@@ -95,8 +95,8 @@ BorderSurface {
     font.family: row.fontFamily
     font.pixelSize: Style.font.bodySmall
     textFormat: Text.PlainText
-    width: visible ? Math.min(implicitWidth, row.width * 0.3) : 0
-    elide: Text.ElideRight
+    width: visible ? Math.min(contentWidth, row.width * 0.3) : 0
+    clip: true
     horizontalAlignment: Text.AlignRight
   }
 

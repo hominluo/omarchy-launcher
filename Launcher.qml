@@ -21,6 +21,8 @@ Item {
   readonly property var core: service ? service : (shell && typeof shell.serviceFor === "function" ? shell.serviceFor(pluginId) : null)
   readonly property bool opened: window.opened
 
+  onOpenedChanged: if (root.core) root.core.windowOpen = root.opened
+
 
   // Payload routes:
   //   {}                                  root search

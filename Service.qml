@@ -5,11 +5,15 @@ import "lib/Score.js" as Score
 import "lib/Frecency.js" as Frecency
 import "lib/ViewModel.js" as VM
 import "lib/Apps.js" as Apps
+import "lib/Calc.js" as Calc
+import "lib/Units.js" as Units
+import "builtins" as Builtins
 
 // Headless core of the launcher, mounted once at shell start and kept alive
 // while the window is hidden. Owns the search index (apps, commands, and
 // everything else that shows up in root search), usage history, on-disk
-// state, and the IPC target other tools use to summon the launcher.
+// state, the built-in commands, and the IPC target other tools use to
+// summon the launcher.
 //
 // The window (Launcher.qml) is a thin view over this object: the host hands
 // it this instance through its `service` property.
@@ -38,7 +42,8 @@ Item {
 
   // Every searchable thing at the root. Entry shape (see lib/Score.js):
   //   { id, kind, title, subtitle, keywords[], aliases[], icon, accessoryText,
-  //     enabled, favorite, run(entry) }
+  //     enabled, favorite, primaryTitle, run(entry, window) }
+  // run() returns true to keep the launcher open.
   property var entries: []
   property var appEntries: []
   property var commandEntries: []
@@ -47,20 +52,102 @@ Item {
   property var frecencyData: Frecency.empty()
   property bool frecencyDirty: false
   property var settings: ({ version: 1, commands: {} })
+  property var guardResults: ({})          // command id -> { when, checked }
+
+  // Mirrors the window state for the bar button.
+  property bool windowOpen: false
+
+  property var builtinCatalog: []
+  property var systemCatalog: []
+  property var windowCatalog: []
 
   signal indexChanged()
 
   function now() { return Math.floor(Date.now() / 1000) }
 
+  readonly property var handlers: ({
+    "clipboard": clipboardBuiltin,
+    "snippets": snippetsBuiltin,
+    "quicklinks": quicklinksBuiltin,
+    "windows": windowsBuiltin,
+    "processes": processesBuiltin,
+    "files": filesBuiltin,
+    "shell": shellBuiltin,
+    "omarchy-menu": omarchyMenuBuiltin,
+    "calculator": null
+  })
+
+  function catalogEntry(raw, kind, accessory) {
+    var e = {
+      id: "cmd:" + String(raw.id),
+      kind: kind,
+      title: String(raw.title || raw.id),
+      subtitle: String(raw.subtitle || ""),
+      keywords: (raw.keywords || []).slice(),
+      aliases: [],
+      baseAliases: (raw.aliases || []).slice(),
+      icon: raw.icon || "󰘔",
+      accessoryText: accessory,
+      enabled: true,
+      favorite: false,
+      primaryTitle: raw.primaryTitle || (raw.handler ? "Open" : "Run"),
+      raw: raw
+    }
+    if (raw.aliases) e.aliases = raw.aliases.slice()
+    e.run = function(entry, win) { return root.runCatalogEntry(entry, win) }
+    return e
+  }
+
+  function runCatalogEntry(entry, win) {
+    var raw = entry.raw
+    if (raw.handler) {
+      if (raw.handler === "calculator") { if (win) win.setSearchText("1+1"); return true }
+      var h = root.handlers[raw.handler]
+      if (!h) return false
+      h.open(win, raw.args || {})
+      return true
+    }
+    var commandLine = raw.exec ? String(raw.exec) : (raw.action ? root.pluginDir + "/bin/wm.sh " + raw.action : "")
+    if (!commandLine) return false
+    var exec = function() {
+      if (raw.delayMs) Quickshell.execDetached(["bash", "-lc", "sleep " + (Number(raw.delayMs) / 1000) + "; " + commandLine])
+      else Quickshell.execDetached(["bash", "-lc", commandLine])
+    }
+    if (raw.confirm && win) {
+      win.confirm(String(raw.confirm), String(raw.confirmText || entry.title), function() { exec(); win.dismiss() })
+      return true
+    }
+    exec()
+    return raw.keepOpen === true
+  }
+
+  function rebuildCommands() {
+    var out = []
+    for (var i = 0; i < root.builtinCatalog.length; i++) out.push(catalogEntry(root.builtinCatalog[i], "command", "Command"))
+    for (var j = 0; j < root.systemCatalog.length; j++) out.push(catalogEntry(root.systemCatalog[j], "command", "System"))
+    for (var k = 0; k < root.windowCatalog.length; k++) out.push(catalogEntry(root.windowCatalog[k], "command", "Window"))
+    root.commandEntries = out
+    root.rebuildIndex()
+  }
+
   function rebuildIndex() {
     var all = root.appEntries.concat(root.commandEntries)
+    var providers = [snippetsBuiltin, quicklinksBuiltin, windowsBuiltin, omarchyMenuBuiltin]
+    for (var p = 0; p < providers.length; p++) {
+      if (providers[p] && typeof providers[p].rootEntries === "function") {
+        try { all = all.concat(providers[p].rootEntries()) } catch (e) { console.warn("launcher: provider failed", e) }
+      }
+    }
     var overrides = root.settings && root.settings.commands ? root.settings.commands : {}
     for (var i = 0; i < all.length; i++) {
       var e = all[i]
+      e.enabled = true
+      e.favorite = false
+      e.aliases = (e.baseAliases || []).slice()
       var o = overrides[e.id]
       if (o) {
         if (o.enabled === false) e.enabled = false
-        if (o.alias) e.aliases = [String(o.alias)].concat(e.baseAliases || [])
+        if (o.alias) e.aliases = [String(o.alias)].concat(e.aliases)
         if (o.favorite === true) e.favorite = true
         if (o.hotkey) e.hotkey = String(o.hotkey)
       }
@@ -76,9 +163,21 @@ Item {
     return null
   }
 
+  function guardOk(entry) {
+    var raw = entry.raw
+    if (!raw || !raw.when) return true
+    var g = root.guardResults[entry.id]
+    return g === undefined ? true : g.when !== false
+  }
+
   // Ranked [{ entry, score }] for a query.
   function search(query, limit) {
-    return Score.rank(root.entries, query, Frecency.scores(root.frecencyData, root.now()), limit || 50)
+    var scores = Frecency.scores(root.frecencyData, root.now())
+    var q = String(query || "").trim()
+    var pool = root.entries
+    if (q.length < 2) pool = pool.filter(function(e) { return e.kind !== "window" && e.kind !== "omarchy-menu" })
+    pool = pool.filter(guardOk)
+    return Score.rank(pool, q, scores, limit || 50)
   }
 
   function suggestions(limit) {
@@ -86,7 +185,7 @@ Item {
     var out = []
     for (var i = 0; i < ids.length && out.length < (limit || 8); i++) {
       var e = root.entryById(ids[i])
-      if (e && e.enabled !== false) out.push(e)
+      if (e && e.enabled !== false && e.kind !== "window" && guardOk(e)) out.push(e)
     }
     return out
   }
@@ -100,14 +199,41 @@ Item {
   // ------------------------------------------------------------- root view
 
   function entryRow(e) {
+    var checked = e.raw && e.raw.checked && root.guardResults[e.id] && root.guardResults[e.id].checked
     return {
       id: e.id,
-      title: e.title,
+      title: e.title + (checked ? "  ✓" : ""),
       subtitle: e.subtitle,
       icon: e.icon,
       keywords: e.keywords,
-      accessories: e.accessoryText ? [{ text: e.accessoryText }] : [],
+      accessories: [{ text: (e.favorite ? "󰓎 " : "") + (e.aliases.length && e.aliases[0] !== (e.baseAliases || [])[0] ? e.aliases[0] + "  " : "") + (e.accessoryText || "") }],
       data: { entryId: e.id }
+    }
+  }
+
+  function calculatorRow(q) {
+    var opts = { angle: root.settings && root.settings.calculator ? root.settings.calculator.angle : "deg" }
+    var r = Calc.evaluate(q, opts)
+    var display, subtitle
+    if (r.ok) { display = r.grouped; subtitle = q + " =" }
+    else {
+      var u = Units.convert(q)
+      if (!u.ok) return null
+      display = u.display; subtitle = u.from + " ="
+    }
+    var self = root
+    return {
+      id: "calc:result",
+      title: display,
+      subtitle: subtitle,
+      icon: "󰃬",
+      accessories: [{ text: "Calculator" }],
+      data: { result: display, expression: q },
+      actions: { sections: [{ actions: [
+        { id: "copy", title: "Copy Result", icon: "󰆏", run: function(item) { Quickshell.execDetached(["wl-copy", "--", String(item.data.result)]); return false } },
+        { id: "paste", title: "Paste Result", icon: "󰆒", run: function(item, win) { win.dismiss(); Quickshell.execDetached(["bash", self.pluginDir + "/bin/paste.sh", String(item.data.result)]); return false } },
+        { id: "copy-both", title: "Copy Expression and Result", icon: "󰆏", run: function(item) { Quickshell.execDetached(["wl-copy", "--", item.data.expression + " = " + item.data.result]); return false } }
+      ] }] }
     }
   }
 
@@ -122,15 +248,22 @@ Item {
       if (sug.length) sections.push({ id: "suggestions", title: "Suggestions", items: sug.map(entryRow) })
       var seen = {}
       for (var s = 0; s < sug.length; s++) seen[sug[s].id] = true
-      var rest = Score.rank(root.entries, "", {}, 0)
+      var rest = root.search("", 0)
       var items = []
       for (var i = 0; i < rest.length; i++) if (!seen[rest[i].entry.id]) items.push(entryRow(rest[i].entry))
       sections.push({ id: "all", title: sug.length ? "All" : "", items: items })
     } else {
+      var calc = root.calculatorRow(q)
+      if (calc) sections.push({ id: "calc", title: "", items: [calc] })
       var ranked = root.search(q, 50)
       var rows = []
       for (var r = 0; r < ranked.length; r++) rows.push(entryRow(ranked[r].entry))
-      sections.push({ id: "results", title: "", items: rows })
+      if (rows.length) sections.push({ id: "results", title: calc ? "Results" : "", items: rows })
+      var strong = ranked.length && ranked[0].score >= 9000
+      if (!strong || rows.length < 3) {
+        var fb = quicklinksBuiltin.fallbackItems(q)
+        if (fb.length) sections.push({ id: "fallback", title: rows.length ? "Use “" + q + "” with…" : "", items: fb })
+      }
     }
     return VM.normalizeView({
       id: "root",
@@ -144,14 +277,109 @@ Item {
   }
 
   // Run an entry. Returns true when the launcher should close afterwards.
-  function activateEntry(entry, launcher) {
+  function activateEntry(entry, win) {
     if (!entry) return false
     root.recordUse(entry.id)
     if (typeof entry.run === "function") {
-      var keepOpen = entry.run(entry, launcher) === true
+      var keepOpen = entry.run(entry, win) === true
       return !keepOpen
     }
     return true
+  }
+
+  function runCommandId(commandId, win, args) {
+    var id = String(commandId || "")
+    var entry = root.entryById(id.indexOf(":") >= 0 ? id : "cmd:" + id)
+    if (!entry) { if (win) win.showToast({ style: "failure", title: "Unknown command", message: id }); return }
+    if (args && entry.raw && entry.raw.handler && root.handlers[entry.raw.handler]) {
+      root.recordUse(entry.id)
+      root.handlers[entry.raw.handler].open(win, Object.assign({}, entry.raw.args || {}, args))
+      return
+    }
+    if (root.activateEntry(entry, win) && win) win.dismiss()
+  }
+
+  // Action panel for a root entry.
+  function entryActions(entry) {
+    var self = root
+    var primary = { id: "primary", title: entry.primaryTitle || (entry.kind === "app" ? "Open" : "Run"), icon: entry.kind === "app" ? "󰏌" : "󰐊",
+      run: function(item, win) { return !self.activateEntry(entry, win) } }
+    var secondary = []
+    secondary.push({ id: "favorite", title: entry.favorite ? "Remove from Favorites" : "Add to Favorites", icon: entry.favorite ? "󰓎" : "󰓒",
+      shortcut: { modifiers: ["ctrl", "shift"], key: "f", label: "⌃⇧F" },
+      run: function(item, win) { self.toggleFavorite(entry.id, win); return true } })
+    if (entry.kind === "app") {
+      secondary.push({ id: "copy-name", title: "Copy Application Name", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.title]); return false } })
+      secondary.push({ id: "hide", title: "Hide from Launcher", icon: "󰛑", style: "destructive",
+        run: function(item, win) { win.confirm("Hide " + entry.title + " from the launcher?", "Hide", function() { self.setCommandOverride(entry.id, { enabled: false }); win.showToast({ style: "success", title: "Hidden " + entry.title, message: "Re-enable it in settings.json" }) }); return true } })
+    } else if (entry.raw && (entry.raw.exec || entry.raw.action)) {
+      secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.raw.exec || (self.pluginDir + "/bin/wm.sh " + entry.raw.action)]); return false } })
+    }
+    secondary.push({ id: "copy-deeplink", title: "Copy Deeplink", icon: "󰌹", run: function() {
+      Quickshell.execDetached(["wl-copy", "--", "omarchy-shell " + self.pluginId + " run " + JSON.stringify(entry.id)]); return false } })
+    return { title: entry.title, sections: [{ actions: [primary] }, { actions: secondary }] }
+  }
+
+  function setCommandOverride(entryId, patch) {
+    var s = root.settings && typeof root.settings === "object" ? root.settings : { version: 1 }
+    if (!s.commands || typeof s.commands !== "object") s.commands = {}
+    var cur = s.commands[entryId] || {}
+    for (var k in patch) cur[k] = patch[k]
+    s.commands[entryId] = cur
+    s.version = 1
+    root.settings = s
+    settingsFile.setText(JSON.stringify(s, null, 2) + "\n")
+    root.rebuildIndex()
+  }
+
+  function toggleFavorite(entryId, win) {
+    var e = root.entryById(entryId)
+    if (!e) return
+    var next = !e.favorite
+    root.setCommandOverride(entryId, { favorite: next })
+    if (win) {
+      win.showToast({ style: "success", title: next ? "Added to Favorites" : "Removed from Favorites", message: e.title })
+      win.onSearchEdited(win.searchTextValue())
+    }
+  }
+
+  // ------------------------------------------------------------- guards
+
+  // Evaluate every catalog when/checked guard in one bash call. Runs when
+  // the window opens so toggles show their state.
+  function evaluateGuards() {
+    var script = ""
+    var count = 0
+    var all = root.commandEntries
+    for (var i = 0; i < all.length; i++) {
+      var raw = all[i].raw
+      if (!raw) continue
+      if (raw.when) { script += "if ( " + raw.when + " ) >/dev/null 2>&1; then echo 'W " + all[i].id + " 1'; else echo 'W " + all[i].id + " 0'; fi\n"; count++ }
+      if (raw.checked) { script += "if ( " + raw.checked + " ) >/dev/null 2>&1; then echo 'C " + all[i].id + " 1'; else echo 'C " + all[i].id + " 0'; fi\n"; count++ }
+    }
+    if (!count || guardProc.running) return
+    guardProc.command = ["bash", "-lc", script]
+    guardProc.running = true
+  }
+
+  Process {
+    id: guardProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var lines = String(text || "").split("\n")
+        var next = {}
+        for (var i = 0; i < lines.length; i++) {
+          var m = lines[i].match(/^([WC]) (\S+) ([01])$/)
+          if (!m) continue
+          var g = next[m[2]] || {}
+          if (m[1] === "W") g.when = m[3] === "1"; else g.checked = m[3] === "1"
+          next[m[2]] = g
+        }
+        root.guardResults = next
+        root.indexRevision += 1
+        root.indexChanged()
+      }
+    }
   }
 
   // ------------------------------------------------------------- apps
@@ -209,6 +437,7 @@ Item {
         accessoryText: "Application",
         enabled: true,
         favorite: false,
+        primaryTitle: "Open",
         desktopId: id,
         run: function(e) { root.launchApp(e.desktopId, e.title) }
       })
@@ -229,9 +458,12 @@ Item {
 
   // Icons may still be landing while the shell starts; refresh when the
   // window opens, exactly as the stock menu does.
+  property double lastIconScan: 0
   function onWindowOpened() {
-    if (!iconIndexScan.running) iconIndexScan.running = true
+    var t = Date.now()
+    if (t - root.lastIconScan > 10 * 60 * 1000 && !iconIndexScan.running) { root.lastIconScan = t; iconIndexScan.running = true }
     if (root.appEntries.length === 0) root.rebuildApps()
+    root.evaluateGuards()
   }
 
   Process {
@@ -243,7 +475,7 @@ Item {
         if (name && root.pendingIconIndex[name] === undefined) root.pendingIconIndex[name] = String(line).trim()
       }
     }
-    onStarted: root.pendingIconIndex = ({})
+    onStarted: { root.pendingIconIndex = ({}); root.lastIconScan = Date.now() }
     onExited: root.iconIndex = root.pendingIconIndex
   }
 
@@ -274,12 +506,43 @@ Item {
     onLoadFailed: root.hiddenIds = ({})
   }
 
+  // ------------------------------------------------------------- builtins
+
+  Builtins.Clipboard { id: clipboardBuiltin; service: root }
+  Builtins.Snippets { id: snippetsBuiltin; service: root }
+  Builtins.Quicklinks { id: quicklinksBuiltin; service: root }
+  Builtins.Windows { id: windowsBuiltin; service: root }
+  Builtins.Processes { id: processesBuiltin; service: root }
+  Builtins.Files { id: filesBuiltin; service: root }
+  Builtins.ShellCommand { id: shellBuiltin; service: root }
+  Builtins.OmarchyMenu { id: omarchyMenuBuiltin; service: root }
+
+  function parseCatalog(raw) {
+    try { var d = JSON.parse(raw); return Array.isArray(d) ? d : [] } catch (e) { console.warn("launcher: bad catalog", e); return [] }
+  }
+
+  FileView {
+    path: root.pluginDir + "/data/builtins.json"
+    printErrors: false
+    onLoaded: { root.builtinCatalog = root.parseCatalog(text()); root.rebuildCommands() }
+  }
+  FileView {
+    path: root.pluginDir + "/data/system-commands.json"
+    printErrors: false
+    onLoaded: { root.systemCatalog = root.parseCatalog(text()); root.rebuildCommands() }
+  }
+  FileView {
+    path: root.pluginDir + "/data/window-actions.json"
+    printErrors: false
+    onLoaded: { root.windowCatalog = root.parseCatalog(text()); root.rebuildCommands() }
+  }
+
   // ------------------------------------------------------------- state files
 
   Process {
     id: mkdirProc
     command: ["mkdir", "-p", root.stateDir, root.configDir]
-    onExited: { frecencyFile.reload(); settingsFile.reload() }
+    onExited: { frecencyFile.reload(); settingsFile.reload(); snippetsBuiltin.reload(); quicklinksBuiltin.reload() }
   }
 
   FileView {

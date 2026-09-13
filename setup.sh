@@ -3,55 +3,49 @@
 #
 #   bash ~/.config/omarchy/plugins/io.github.hominluo.launcher/setup.sh [--hotkey "SUPER + D"] [--no-hotkey]
 #
-# What it does:
-#   1. Creates the config/state directories.
-#   2. Adds a Hyprland binding that toggles the launcher (default SUPER + D),
-#      inside a marker block in ~/.config/hypr/bindings.lua so re-runs replace
-#      rather than duplicate it. A timestamped backup is written first.
-#   3. Enables the plugin if it is not enabled yet.
+# 1. Creates the config/state directories and a settings.json if missing.
+# 2. Records the launcher hotkey (default SUPER + D) in settings.json and
+#    writes the managed binding block into ~/.config/hypr/bindings.lua
+#    (bin/hotkeys.py; a timestamped backup of the file is written first).
+# 3. Enables the plugin if it is not enabled yet.
 set -euo pipefail
 
 PLUGIN_ID="io.github.hominluo.launcher"
-HOTKEY="SUPER + D"
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="$HOME/.config/omarchy-launcher"
+SETTINGS="$CONFIG_DIR/settings.json"
+HOTKEY=""
 WRITE_HOTKEY=1
-BINDINGS="$HOME/.config/hypr/bindings.lua"
-BEGIN="-- >>> $PLUGIN_ID managed hotkeys (edit with: bash ~/.config/omarchy/plugins/$PLUGIN_ID/setup.sh --hotkey \"...\") >>>"
-END="-- <<< $PLUGIN_ID managed hotkeys <<<"
 
 while (( $# > 0 )); do
   case "$1" in
     --hotkey) HOTKEY="${2:-}"; shift 2 ;;
     --no-hotkey) WRITE_HOTKEY=0; shift ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "setup: unknown option $1" >&2; exit 1 ;;
   esac
 done
 
-mkdir -p "$HOME/.config/omarchy-launcher" "$HOME/.local/state/omarchy-launcher" "$HOME/.local/share/omarchy-launcher"
+mkdir -p "$CONFIG_DIR" "$HOME/.local/state/omarchy-launcher" "$HOME/.local/share/omarchy-launcher"
+[[ -f $SETTINGS ]] || printf '{\n  "version": 1,\n  "hotkey": "SUPER + D",\n  "commands": {}\n}\n' > "$SETTINGS"
+
+if [[ -n $HOTKEY ]]; then
+  python3 - "$SETTINGS" "$HOTKEY" <<'PY'
+import json, sys
+path, key = sys.argv[1:3]
+try:
+    data = json.load(open(path))
+except Exception:
+    data = {}
+data["version"] = 1
+data["hotkey"] = key
+json.dump(data, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+PY
+fi
 
 if (( WRITE_HOTKEY )); then
-  [[ -f $BINDINGS ]] || { echo "setup: $BINDINGS not found; is this an Omarchy 4 system?" >&2; exit 1; }
-  block=$(printf '%s\n%s\n%s' "$BEGIN" "o.bind(\"$HOTKEY\", \"Launcher\", \"omarchy-shell shell toggle $PLUGIN_ID\")" "$END")
-  cp "$BINDINGS" "$BINDINGS.bak.$(date +%s)"
-  if grep -qF -- "$BEGIN" "$BINDINGS"; then
-    # Replace the existing block in place.
-    python3 - "$BINDINGS" "$BEGIN" "$END" "$block" <<'PY'
-import sys
-path, begin, end, block = sys.argv[1:5]
-src = open(path).read()
-i = src.index(begin); j = src.index(end, i) + len(end)
-open(path, "w").write(src[:i] + block + src[j:])
-PY
-  else
-    printf '\n%s\n' "$block" >> "$BINDINGS"
-  fi
-  hyprctl reload >/dev/null 2>&1 || true
-  errors=$(hyprctl configerrors 2>/dev/null || true)
-  if [[ -n $errors && $errors != *"No config errors"* ]]; then
-    echo "setup: Hyprland reported config errors after adding the binding:" >&2
-    echo "$errors" >&2
-  fi
-  echo "Hotkey: $HOTKEY toggles the launcher (block written to $BINDINGS)"
+  python3 "$PLUGIN_DIR/bin/hotkeys.py" --apply
 fi
 
 if omarchy plugin list 2>/dev/null | grep -q "^$PLUGIN_ID .*disabled"; then
@@ -59,4 +53,5 @@ if omarchy plugin list 2>/dev/null | grep -q "^$PLUGIN_ID .*disabled"; then
   echo "Enabled $PLUGIN_ID"
 fi
 
-echo "Done. Open with: omarchy-shell shell toggle $PLUGIN_ID"
+hotkey=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("hotkey","SUPER + D"))' "$SETTINGS" 2>/dev/null || echo "SUPER + D")
+echo "Done. Press $hotkey, click the bar button, or run: omarchy-shell shell toggle $PLUGIN_ID"

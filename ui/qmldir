@@ -7,3 +7,6 @@ IconGlyph 1.0 IconGlyph.qml
 StatusBar 1.0 StatusBar.qml
 KeyCap 1.0 KeyCap.qml
 EmptyView 1.0 EmptyView.qml
+ActionPanel 1.0 ActionPanel.qml
+Toast 1.0 Toast.qml
+DetailPane 1.0 DetailPane.qml

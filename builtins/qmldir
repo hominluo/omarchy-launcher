@@ -1,0 +1,10 @@
+BuiltinHost 1.0 BuiltinHost.qml
+Clipboard 1.0 Clipboard.qml
+Snippets 1.0 Snippets.qml
+Quicklinks 1.0 Quicklinks.qml
+Windows 1.0 Windows.qml
+Processes 1.0 Processes.qml
+Files 1.0 Files.qml
+ShellCommand 1.0 ShellCommand.qml
+OmarchyMenu 1.0 OmarchyMenu.qml
+SystemCommands 1.0 SystemCommands.qml

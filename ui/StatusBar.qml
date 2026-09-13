@@ -9,6 +9,7 @@ Item {
   property string title: "Launcher"
   property string primaryTitle: "Open"
   property bool primaryVisible: true
+  property bool leadingVisible: true
   property bool actionsVisible: true
   property color foreground: Color.menu.text
   property string fontFamily: Style.font.menuFamily
@@ -17,6 +18,7 @@ Item {
   signal primaryClicked()
 
   Row {
+    visible: bar.leadingVisible
     anchors.left: parent.left
     anchors.leftMargin: Style.space(16)
     anchors.verticalCenter: parent.verticalCenter

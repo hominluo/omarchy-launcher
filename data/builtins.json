@@ -1,0 +1,18 @@
+[
+  { "id": "clipboard", "title": "Clipboard History", "subtitle": "", "keywords": ["paste", "copy", "history", "clipboard"], "icon": "󰨸", "handler": "clipboard" },
+  { "id": "snippets", "title": "Search Snippets", "keywords": ["snippet", "text expansion", "paste"], "icon": "󰧭", "handler": "snippets" },
+  { "id": "quicklinks", "title": "Search Quicklinks", "keywords": ["quicklink", "bookmark", "url", "link"], "icon": "󰌹", "handler": "quicklinks" },
+  { "id": "windows", "title": "Switch Windows", "keywords": ["window", "switcher", "focus", "alt tab"], "icon": "󰖯", "handler": "windows", "args": { "mode": "switch" } },
+  { "id": "processes", "title": "Kill Process", "keywords": ["process", "kill", "task", "cpu", "memory", "top"], "icon": "󰯈", "handler": "processes" },
+  { "id": "files", "title": "Search Files", "keywords": ["file", "find", "folder", "directory"], "icon": "󰱽", "handler": "files" },
+  { "id": "shell", "title": "Run Shell Command", "keywords": ["terminal", "bash", "run", "exec", "command"], "icon": "󰆍", "handler": "shell" },
+  { "id": "omarchy-menu", "title": "Omarchy Menu", "subtitle": "Browse the stock Omarchy menu", "keywords": ["omarchy", "menu", "setup", "install", "style"], "icon": "󰍜", "handler": "omarchy-menu" },
+  { "id": "calculator", "title": "Calculator", "subtitle": "Type an expression in the search field", "keywords": ["math", "calc", "convert", "units"], "icon": "󰃬", "handler": "calculator" },
+  { "id": "capture-screenshot", "title": "Take Screenshot", "subtitle": "Select a region", "keywords": ["screenshot", "capture", "grab", "screen"], "icon": "󰹑", "exec": "omarchy-capture-screenshot region", "delayMs": 200 },
+  { "id": "capture-screenshot-window", "title": "Screenshot Window", "keywords": ["screenshot", "capture", "window"], "icon": "󰹑", "exec": "omarchy-capture-screenshot windows", "delayMs": 200 },
+  { "id": "capture-screenshot-full", "title": "Screenshot Full Screen", "keywords": ["screenshot", "capture", "fullscreen"], "icon": "󰹑", "exec": "omarchy-capture-screenshot fullscreen", "delayMs": 200 },
+  { "id": "capture-text", "title": "Capture Text (OCR)", "subtitle": "Copy text from a screen region", "keywords": ["ocr", "text", "recognize", "copy"], "icon": "󰈤", "exec": "omarchy-capture-text", "delayMs": 200 },
+  { "id": "capture-qr", "title": "Scan QR Code", "subtitle": "Decode a QR code on screen", "keywords": ["qr", "code", "scan"], "icon": "󰐳", "exec": "omarchy-capture-qr", "delayMs": 200 },
+  { "id": "capture-record", "title": "Record Screen", "subtitle": "Select a region to record", "keywords": ["record", "video", "screencast", "gif"], "icon": "󰑋", "exec": "omarchy-capture-screenrecording", "delayMs": 200 },
+  { "id": "capture-record-stop", "title": "Stop Recording", "keywords": ["record", "stop"], "icon": "󰑋", "exec": "omarchy-capture-screenrecording --stop-recording", "when": "pgrep -x gpu-screen-recorder" }
+]
