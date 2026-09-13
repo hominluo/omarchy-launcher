@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/index.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
-var import_node_child_process2 = require("node:child_process");
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
+var import_node_child_process3 = require("node:child_process");
 
 // src/store.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -104,15 +104,135 @@ async function download(meta, dest) {
   return dest;
 }
 
-// src/registry.ts
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
-
-// src/compat.ts
+// src/build.ts
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
+var import_node_child_process2 = require("node:child_process");
+var import_node_crypto = require("node:crypto");
+function parseSource(spec) {
+  const s = spec.trim();
+  if (import_node_fs2.default.existsSync(s) && import_node_fs2.default.existsSync(import_node_path3.default.join(s, "package.json"))) return { kind: "local", dir: import_node_path3.default.resolve(s) };
+  let m = s.match(/^https?:\/\/github\.com\/raycast\/extensions\/(?:tree|blob)\/([^/]+)\/extensions\/([^/?#]+)/);
+  if (m) return { kind: "git", url: "https://github.com/raycast/extensions.git", ref: m[1], subdir: "extensions/" + m[2] };
+  m = s.match(/^(git@[^#]+|https?:\/\/[^#]+?\.git|https?:\/\/github\.com\/[^/]+\/[^/#]+)(?:#(.+))?$/);
+  if (m) return { kind: "git", url: m[1].endsWith(".git") || m[1].startsWith("git@") ? m[1] : m[1] + ".git", subdir: m[2] };
+  return null;
+}
+function run(cmd, args, cwd) {
+  const r = (0, import_node_child_process2.spawnSync)(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  if (r.status !== 0) {
+    const out = String(r.stderr || r.stdout || "");
+    const cut = out.indexOf("node:child_process");
+    throw new Error(`${import_node_path3.default.basename(cmd)} ${args.slice(0, 2).join(" ")} failed:
+${(cut > 0 ? out.slice(0, cut) : out).trim().slice(-1500)}`);
+  }
+  return r.stdout;
+}
+function fetchSource(spec, log) {
+  if (spec.kind === "local") return spec.dir;
+  const key = (0, import_node_crypto.createHash)("sha1").update(spec.url + "#" + (spec.subdir || "")).digest("hex").slice(0, 16);
+  const dir = import_node_path3.default.join(CACHE_DIR, "src", key);
+  if (import_node_fs2.default.existsSync(import_node_path3.default.join(dir, ".git"))) {
+    log(`Updating ${spec.url}\u2026`);
+    run("git", ["pull", "--ff-only", "--quiet"], dir);
+  } else {
+    import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(dir), { recursive: true });
+    log(`Cloning ${spec.url}${spec.subdir ? " (" + spec.subdir + ")" : ""}\u2026`);
+    if (spec.subdir) {
+      run("git", ["clone", "--filter=blob:none", "--sparse", "--depth", "1", ...spec.ref ? ["--branch", spec.ref] : [], spec.url, dir], CACHE_DIR);
+      run("git", ["sparse-checkout", "set", spec.subdir], dir);
+    } else {
+      run("git", ["clone", "--depth", "1", ...spec.ref ? ["--branch", spec.ref] : [], spec.url, dir], CACHE_DIR);
+    }
+  }
+  const src = spec.subdir ? import_node_path3.default.join(dir, spec.subdir) : dir;
+  if (!import_node_fs2.default.existsSync(import_node_path3.default.join(src, "package.json"))) throw new Error("no package.json in " + src);
+  return src;
+}
+function findEntry(src, name, tools = false) {
+  const base = tools ? import_node_path3.default.join(src, "src", "tools") : import_node_path3.default.join(src, "src");
+  for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
+    const p = import_node_path3.default.join(base, name + ext);
+    if (import_node_fs2.default.existsSync(p)) return p;
+  }
+  return null;
+}
+function build(src, log) {
+  const manifest = JSON.parse(import_node_fs2.default.readFileSync(import_node_path3.default.join(src, "package.json"), "utf8"));
+  if (!manifest.name) throw new Error("package.json has no name");
+  const owner = manifest.owner || manifest.author || "local";
+  log("Installing dependencies (npm, scripts disabled)\u2026");
+  const hasLock = import_node_fs2.default.existsSync(import_node_path3.default.join(src, "package-lock.json"));
+  run("npm", [hasLock ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], src);
+  const esbuild = import_node_path3.default.join(src, "node_modules", "esbuild", "bin", "esbuild");
+  if (!import_node_fs2.default.existsSync(esbuild)) throw new Error("esbuild not found in the extension's node_modules (is @raycast/api a dependency?)");
+  const dest = import_node_path3.default.join(EXT_DIR, owner, manifest.name);
+  const staging = dest + ".building";
+  import_node_fs2.default.rmSync(staging, { recursive: true, force: true });
+  import_node_fs2.default.mkdirSync(staging, { recursive: true });
+  const common = [
+    "--bundle",
+    "--platform=node",
+    "--target=node22",
+    "--format=cjs",
+    "--jsx=automatic",
+    "--minify",
+    "--sourcemap=linked",
+    "--log-level=warning",
+    "--external:@raycast/api",
+    "--external:react",
+    "--external:react/jsx-runtime",
+    "--external:react/jsx-dev-runtime",
+    "--external:swift:*",
+    "--external:rust:*",
+    // Raycast's native-module imports (macOS only); the compat scan flags them
+    "--loader:.node=file",
+    "--loader:.swift=empty",
+    "--loader:.ps1=text",
+    "--loader:.md=text",
+    '--define:process.env.NODE_ENV="production"'
+  ];
+  for (const cmd of manifest.commands || []) {
+    const entry = findEntry(src, cmd.name);
+    if (!entry) {
+      log(`  skipping ${cmd.name}: no src/${cmd.name}.{tsx,ts,jsx,js}`);
+      continue;
+    }
+    log(`  bundling ${cmd.name}`);
+    run("node", [esbuild, entry, `--outfile=${import_node_path3.default.join(staging, cmd.name + ".js")}`, ...common], src);
+  }
+  if (Array.isArray(manifest.tools) && manifest.tools.length) {
+    import_node_fs2.default.mkdirSync(import_node_path3.default.join(staging, "tools"), { recursive: true });
+    for (const tool of manifest.tools) {
+      const entry = findEntry(src, tool.name, true);
+      if (!entry) continue;
+      log(`  bundling tool ${tool.name}`);
+      run("node", [esbuild, entry, `--outfile=${import_node_path3.default.join(staging, "tools", tool.name + ".js")}`, ...common], src);
+    }
+  }
+  import_node_fs2.default.copyFileSync(import_node_path3.default.join(src, "package.json"), import_node_path3.default.join(staging, "package.json"));
+  if (import_node_fs2.default.existsSync(import_node_path3.default.join(src, "assets"))) import_node_fs2.default.cpSync(import_node_path3.default.join(src, "assets"), import_node_path3.default.join(staging, "assets"), { recursive: true });
+  for (const f of import_node_fs2.default.readdirSync(staging)) if (f.endsWith(".js.map")) import_node_fs2.default.rmSync(import_node_path3.default.join(staging, f));
+  let commit = "";
+  try {
+    commit = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "HEAD"], { cwd: src, encoding: "utf8" }).trim();
+  } catch {
+  }
+  import_node_fs2.default.rmSync(dest, { recursive: true, force: true });
+  import_node_fs2.default.renameSync(staging, dest);
+  return { dir: dest, manifest, commit };
+}
+
+// src/registry.ts
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
+
+// src/compat.ts
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
 var MARKERS = [
   [/\(0,\s*[A-Za-z_$][\w$]*\.runAppleScript\)\(|[^\w$.]runAppleScript\(`|tell application "|\.applescript\b/, "AppleScript", "unsupported"],
+  [/(require|import)\("(swift|rust):/, "native macOS module (swift:/rust: import)", "unsupported"],
   [/\bopen -a\b|\/Applications\/|~\/Library\/|\/Library\/Application Support/, "macOS paths or apps", "partial"],
   [/\bdefaults (read|write)\b|\bmdfind\b|\bmdls\b|\bpbcopy\b|\bpbpaste\b|\bscreencapture\b|\bafplay\b|\bcaffeinate\b/, "macOS command-line tools", "partial"],
   [/getSelectedFinderItems|Action\.ShowInFinder|showInFinder/, "Finder integration", "partial"],
@@ -120,10 +240,10 @@ var MARKERS = [
 ];
 function isMachO(file) {
   try {
-    const fd = import_node_fs2.default.openSync(file, "r");
+    const fd = import_node_fs3.default.openSync(file, "r");
     const b = Buffer.alloc(4);
-    import_node_fs2.default.readSync(fd, b, 0, 4, 0);
-    import_node_fs2.default.closeSync(fd);
+    import_node_fs3.default.readSync(fd, b, 0, 4, 0);
+    import_node_fs3.default.closeSync(fd);
     const magic = b.readUInt32BE(0);
     return magic === 4277009102 || magic === 4277009103 || magic === 3405691582 || magic === 3472551422 || magic === 3489328638;
   } catch {
@@ -134,11 +254,11 @@ function scan(dir, manifest) {
   const report = { status: "full", notes: [], commands: {} };
   const worst = (a, b) => a === "unsupported" || b === "unsupported" ? "unsupported" : a === "partial" || b === "partial" ? "partial" : "full";
   for (const cmd of manifest.commands || []) {
-    const file = import_node_path3.default.join(dir, cmd.name + ".js");
+    const file = import_node_path4.default.join(dir, cmd.name + ".js");
     const entry = { status: "full", notes: [] };
     let src = "";
     try {
-      src = import_node_fs2.default.readFileSync(file, "utf8");
+      src = import_node_fs3.default.readFileSync(file, "utf8");
     } catch {
       entry.status = "unsupported";
       entry.notes.push("bundle missing");
@@ -160,11 +280,11 @@ function scan(dir, manifest) {
     report.status = worst(report.status, entry.status);
     for (const n of entry.notes) if (report.notes.indexOf(n) < 0) report.notes.push(n);
   }
-  const assets = import_node_path3.default.join(dir, "assets");
+  const assets = import_node_path4.default.join(dir, "assets");
   try {
-    for (const f of import_node_fs2.default.readdirSync(assets)) {
-      const p = import_node_path3.default.join(assets, f);
-      if (import_node_fs2.default.statSync(p).isFile() && (f.endsWith(".swift") || isMachO(p))) {
+    for (const f of import_node_fs3.default.readdirSync(assets)) {
+      const p = import_node_path4.default.join(assets, f);
+      if (import_node_fs3.default.statSync(p).isFile() && (f.endsWith(".swift") || isMachO(p))) {
         report.notes.push("native macOS helper: " + f);
         report.status = "unsupported";
       }
@@ -178,29 +298,29 @@ function scan(dir, manifest) {
 // src/registry.ts
 function readIndex() {
   try {
-    const d = JSON.parse(import_node_fs3.default.readFileSync(INDEX_FILE, "utf8"));
+    const d = JSON.parse(import_node_fs4.default.readFileSync(INDEX_FILE, "utf8"));
     if (d && Array.isArray(d.extensions)) return d;
   } catch {
   }
   return { version: 1, extensions: [] };
 }
 function writeIndex(idx) {
-  import_node_fs3.default.mkdirSync(EXT_DIR, { recursive: true });
+  import_node_fs4.default.mkdirSync(EXT_DIR, { recursive: true });
   const tmp = INDEX_FILE + ".tmp";
-  import_node_fs3.default.writeFileSync(tmp, JSON.stringify(idx, null, 2) + "\n");
-  import_node_fs3.default.renameSync(tmp, INDEX_FILE);
+  import_node_fs4.default.writeFileSync(tmp, JSON.stringify(idx, null, 2) + "\n");
+  import_node_fs4.default.renameSync(tmp, INDEX_FILE);
 }
 function entryFor(dir, owner, name, install) {
-  const manifest = JSON.parse(import_node_fs3.default.readFileSync(import_node_path4.default.join(dir, "package.json"), "utf8"));
+  const manifest = JSON.parse(import_node_fs4.default.readFileSync(import_node_path5.default.join(dir, "package.json"), "utf8"));
   const compat = scan(dir, manifest);
-  const iconFile = manifest.icon ? import_node_path4.default.join(dir, "assets", manifest.icon) : "";
+  const iconFile = manifest.icon ? import_node_path5.default.join(dir, "assets", manifest.icon) : "";
   return {
     id: `${owner}/${name}`,
     owner,
     name,
     title: String(manifest.title || name),
     description: String(manifest.description || ""),
-    icon: iconFile && import_node_fs3.default.existsSync(iconFile) ? iconFile : "",
+    icon: iconFile && import_node_fs4.default.existsSync(iconFile) ? iconFile : "",
     dir,
     source: install.source || "store",
     commit: String(install.commit || ""),
@@ -214,7 +334,7 @@ function entryFor(dir, owner, name, install) {
       subtitle: c.subtitle || "",
       description: c.description || "",
       mode: c.mode || "view",
-      icon: c.icon && import_node_fs3.default.existsSync(import_node_path4.default.join(dir, "assets", c.icon)) ? import_node_path4.default.join(dir, "assets", c.icon) : "",
+      icon: c.icon && import_node_fs4.default.existsSync(import_node_path5.default.join(dir, "assets", c.icon)) ? import_node_path5.default.join(dir, "assets", c.icon) : "",
       keywords: c.keywords || [],
       arguments: c.arguments || [],
       preferences: c.preferences || [],
@@ -228,15 +348,15 @@ function entryFor(dir, owner, name, install) {
 function rebuild() {
   const out = [];
   try {
-    for (const owner of import_node_fs3.default.readdirSync(EXT_DIR)) {
-      const od = import_node_path4.default.join(EXT_DIR, owner);
-      if (!import_node_fs3.default.statSync(od).isDirectory()) continue;
-      for (const name of import_node_fs3.default.readdirSync(od)) {
-        const dir = import_node_path4.default.join(od, name);
-        if (!import_node_fs3.default.existsSync(import_node_path4.default.join(dir, "package.json"))) continue;
+    for (const owner of import_node_fs4.default.readdirSync(EXT_DIR)) {
+      const od = import_node_path5.default.join(EXT_DIR, owner);
+      if (!import_node_fs4.default.statSync(od).isDirectory()) continue;
+      for (const name of import_node_fs4.default.readdirSync(od)) {
+        const dir = import_node_path5.default.join(od, name);
+        if (!import_node_fs4.default.existsSync(import_node_path5.default.join(dir, "package.json"))) continue;
         let install = {};
         try {
-          install = JSON.parse(import_node_fs3.default.readFileSync(import_node_path4.default.join(dir, "install.json"), "utf8"));
+          install = JSON.parse(import_node_fs4.default.readFileSync(import_node_path5.default.join(dir, "install.json"), "utf8"));
         } catch {
         }
         try {
@@ -259,6 +379,7 @@ var USAGE = `launcher \u2014 Omarchy Launcher command line
 
   launcher ext search <query>            search the Raycast Store
   launcher ext install <owner/name|url>  install a store extension (prebuilt, no toolchain needed)
+  launcher ext install <dir|git-url>     build and install from source (needs npm); github.com/raycast/extensions/tree/main/extensions/<name> works
   launcher ext update [owner/name]       update one or every store extension
   launcher ext remove <owner/name>       remove an extension
   launcher ext list [--json]             installed extensions and their commands
@@ -270,13 +391,32 @@ var USAGE = `launcher \u2014 Omarchy Launcher command line
   launcher status                        runtime status
 `;
 function shell(method, ...args) {
-  const r = (0, import_node_child_process2.spawnSync)("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8" });
+  const r = (0, import_node_child_process3.spawnSync)("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8" });
   return (r.stdout || "").trim();
 }
 function b64(json) {
   return Buffer.from(JSON.stringify(json)).toString("base64");
 }
+async function extInstallSource(spec) {
+  const source = parseSource(spec);
+  if (!source) throw new Error(`cannot parse "${spec}"`);
+  const log = (line) => process.stdout.write(line + "\n");
+  const src = fetchSource(source, log);
+  const built = build(src, log);
+  const owner = built.manifest.owner || built.manifest.author || "local";
+  import_node_fs5.default.writeFileSync(import_node_path6.default.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner, name: built.manifest.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2));
+  const idx = readIndex();
+  const entry = entryFor(built.dir, owner, built.manifest.name, JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(built.dir, "install.json"), "utf8")));
+  idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
+  writeIndex(idx);
+  process.stdout.write(`Built and installed ${entry.title}: ${entry.commands.map((c) => c.title).join(", ")}
+`);
+  if (entry.compat.status !== "full") process.stdout.write(`Compatibility: ${entry.compat.status} (${entry.compat.notes.join("; ")})
+`);
+  shell("reindex");
+}
 async function extInstall(spec) {
+  if (/^(https?:\/\/|git@)/.test(spec) && !/raycast\.com\//.test(spec) || import_node_fs5.default.existsSync(spec) && import_node_fs5.default.existsSync(import_node_path6.default.join(spec, "package.json"))) return extInstallSource(spec);
   const r = resolveSpec(spec);
   if (!r) throw new Error(`cannot parse "${spec}"; use owner/name or a store URL`);
   process.stdout.write(`Looking up ${r.owner ? r.owner + "/" : ""}${r.name}\u2026
@@ -284,13 +424,13 @@ async function extInstall(spec) {
   const meta = await lookup(r);
   if (meta.kill_listed_at) throw new Error("this extension was removed from the store");
   const owner = meta.owner && meta.owner.handle || meta.author && meta.author.handle || r.owner || "unknown";
-  const dest = import_node_path5.default.join(EXT_DIR, owner, meta.name);
+  const dest = import_node_path6.default.join(EXT_DIR, owner, meta.name);
   process.stdout.write(`Downloading ${meta.title} (${owner}/${meta.name}, api ${meta.api_version})\u2026
 `);
   await download(meta, dest);
-  import_node_fs4.default.writeFileSync(import_node_path5.default.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name: meta.name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2));
+  import_node_fs5.default.writeFileSync(import_node_path6.default.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name: meta.name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2));
   const idx = readIndex();
-  const entry = entryFor(dest, owner, meta.name, JSON.parse(import_node_fs4.default.readFileSync(import_node_path5.default.join(dest, "install.json"), "utf8")));
+  const entry = entryFor(dest, owner, meta.name, JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dest, "install.json"), "utf8")));
   idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
   writeIndex(idx);
   process.stdout.write(`Installed ${entry.title}: ${entry.commands.map((c) => c.title).join(", ")}
@@ -304,9 +444,22 @@ async function extInstall(spec) {
 }
 async function extUpdate(spec) {
   const idx = readIndex();
-  const targets = spec ? idx.extensions.filter((e) => e.id === spec || e.name === spec) : idx.extensions.filter((e) => e.source === "store");
+  const targets = spec ? idx.extensions.filter((e) => e.id === spec || e.name === spec) : idx.extensions;
   if (!targets.length) throw new Error("nothing to update");
   for (const e of targets) {
+    if (e.source !== "store") {
+      let origin = "";
+      try {
+        origin = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(e.dir, "install.json"), "utf8")).origin || "";
+      } catch {
+      }
+      if (origin) {
+        process.stdout.write(`${e.id}: rebuilding from ${origin}
+`);
+        await extInstallSource(origin);
+      }
+      continue;
+    }
     const meta = await lookup({ owner: e.owner, name: e.name });
     if (meta.commit_sha === e.commit) {
       process.stdout.write(`${e.id}: up to date
@@ -322,7 +475,7 @@ function extRemove(spec) {
   const idx = readIndex();
   const e = idx.extensions.find((x) => x.id === spec || x.name === spec);
   if (!e) throw new Error(`not installed: ${spec}`);
-  import_node_fs4.default.rmSync(e.dir, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(e.dir, { recursive: true, force: true });
   idx.extensions = idx.extensions.filter((x) => x.id !== e.id);
   writeIndex(idx);
   process.stdout.write(`Removed ${e.id}
@@ -390,7 +543,7 @@ function handleUrl(uri) {
     return;
   }
   if (parts[0] === "confetti") {
-    (0, import_node_child_process2.spawnSync)("omarchy-notification-send", ["\u{1F389}", "Confetti!"]);
+    (0, import_node_child_process3.spawnSync)("omarchy-notification-send", ["\u{1F389}", "Confetti!"]);
     return;
   }
   if (parts[0] === "quicklink" && parts[1]) {
@@ -409,7 +562,7 @@ function handleUrl(uri) {
 }
 async function main(argv) {
   const [cmd, sub, ...rest] = argv;
-  for (const d of [CONFIG_DIR, DATA_DIR, STATE_DIR, EXT_DIR, PREFS_DIR]) import_node_fs4.default.mkdirSync(d, { recursive: true });
+  for (const d of [CONFIG_DIR, DATA_DIR, STATE_DIR, EXT_DIR, PREFS_DIR]) import_node_fs5.default.mkdirSync(d, { recursive: true });
   switch (cmd) {
     case "ext":
       if (sub === "install") {
@@ -418,6 +571,10 @@ async function main(argv) {
       }
       if (sub === "update") {
         await extUpdate(rest[0]);
+        return;
+      }
+      if (sub === "build") {
+        await extInstallSource(rest[0] || ".");
         return;
       }
       if (sub === "remove" || sub === "uninstall") {

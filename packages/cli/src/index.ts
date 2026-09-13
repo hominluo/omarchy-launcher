@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
 import { resolveSpec, lookup, download, search } from "./store"
+import { parseSource, fetchSource, build } from "./build"
 import { readIndex, rebuild, entryFor, writeIndex } from "./registry"
 import { EXT_DIR, PLUGIN_ID, CONFIG_DIR, DATA_DIR, STATE_DIR, PREFS_DIR } from "./paths"
 
@@ -10,6 +11,7 @@ const USAGE = `launcher — Omarchy Launcher command line
 
   launcher ext search <query>            search the Raycast Store
   launcher ext install <owner/name|url>  install a store extension (prebuilt, no toolchain needed)
+  launcher ext install <dir|git-url>     build and install from source (needs npm); github.com/raycast/extensions/tree/main/extensions/<name> works
   launcher ext update [owner/name]       update one or every store extension
   launcher ext remove <owner/name>       remove an extension
   launcher ext list [--json]             installed extensions and their commands
@@ -28,7 +30,25 @@ function shell(method: string, ...args: string[]) {
 
 function b64(json: any) { return Buffer.from(JSON.stringify(json)).toString("base64") }
 
+async function extInstallSource(spec: string) {
+  const source = parseSource(spec)
+  if (!source) throw new Error(`cannot parse "${spec}"`)
+  const log = (line: string) => process.stdout.write(line + "\n")
+  const src = fetchSource(source, log)
+  const built = build(src, log)
+  const owner = built.manifest.owner || built.manifest.author || "local"
+  fs.writeFileSync(path.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner, name: built.manifest.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2))
+  const idx = readIndex()
+  const entry = entryFor(built.dir, owner, built.manifest.name, JSON.parse(fs.readFileSync(path.join(built.dir, "install.json"), "utf8")))
+  idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id))
+  writeIndex(idx)
+  process.stdout.write(`Built and installed ${entry.title}: ${entry.commands.map((c: any) => c.title).join(", ")}\n`)
+  if (entry.compat.status !== "full") process.stdout.write(`Compatibility: ${entry.compat.status} (${entry.compat.notes.join("; ")})\n`)
+  shell("reindex")
+}
+
 async function extInstall(spec: string) {
+  if (/^(https?:\/\/|git@)/.test(spec) && !/raycast\.com\//.test(spec) || (fs.existsSync(spec) && fs.existsSync(path.join(spec, "package.json")))) return extInstallSource(spec)
   const r = resolveSpec(spec)
   if (!r) throw new Error(`cannot parse "${spec}"; use owner/name or a store URL`)
   process.stdout.write(`Looking up ${r.owner ? r.owner + "/" : ""}${r.name}…\n`)
@@ -52,9 +72,15 @@ async function extInstall(spec: string) {
 
 async function extUpdate(spec?: string) {
   const idx = readIndex()
-  const targets = spec ? idx.extensions.filter((e) => e.id === spec || e.name === spec) : idx.extensions.filter((e) => e.source === "store")
+  const targets = spec ? idx.extensions.filter((e) => e.id === spec || e.name === spec) : idx.extensions
   if (!targets.length) throw new Error("nothing to update")
   for (const e of targets) {
+    if (e.source !== "store") {
+      let origin = ""
+      try { origin = JSON.parse(fs.readFileSync(path.join(e.dir, "install.json"), "utf8")).origin || "" } catch {}
+      if (origin) { process.stdout.write(`${e.id}: rebuilding from ${origin}\n`); await extInstallSource(origin) }
+      continue
+    }
     const meta = await lookup({ owner: e.owner, name: e.name })
     if (meta.commit_sha === e.commit) { process.stdout.write(`${e.id}: up to date\n`); continue }
     process.stdout.write(`${e.id}: ${String(e.commit).slice(0, 7)} → ${String(meta.commit_sha).slice(0, 7)}\n`)
@@ -123,6 +149,7 @@ async function main(argv: string[]) {
     case "ext":
       if (sub === "install") { for (const s of rest) await extInstall(s); return }
       if (sub === "update") { await extUpdate(rest[0]); return }
+      if (sub === "build") { await extInstallSource(rest[0] || "."); return }
       if (sub === "remove" || sub === "uninstall") { extRemove(rest[0]); return }
       if (sub === "list" || sub === undefined) { extList(rest.includes("--json")); return }
       if (sub === "search") { await extSearch(rest.join(" ")); return }

@@ -219,6 +219,8 @@ export function runWorker(data: { load: LoadParams; host: any }) {
     mod = require(load.entrypoint)
   } catch (e: any) {
     log("failed to load " + load.entrypoint + ": " + (e && e.stack || e))
+    // Report ready first so the shell keeps the session (and its error page) instead of timing out.
+    port.postMessage({ type: "ready" })
     client.notify("manager.crash", { reason: "Failed to load the extension: " + String(e && e.message || e), stack: String(e && e.stack || "") })
     return
   }

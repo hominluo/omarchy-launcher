@@ -12227,6 +12227,7 @@ function runWorker(data) {
     mod = require(load.entrypoint);
   } catch (e) {
     log("failed to load " + load.entrypoint + ": " + (e && e.stack || e));
+    port.postMessage({ type: "ready" });
     client2.notify("manager.crash", { reason: "Failed to load the extension: " + String(e && e.message || e), stack: String(e && e.stack || "") });
     return;
   }

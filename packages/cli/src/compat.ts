@@ -8,6 +8,7 @@ import path from "node:path"
 // AppleScript source literal.
 const MARKERS: Array<[RegExp, string, "unsupported" | "partial"]> = [
   [/\(0,\s*[A-Za-z_$][\w$]*\.runAppleScript\)\(|[^\w$.]runAppleScript\(`|tell application "|\.applescript\b/, "AppleScript", "unsupported"],
+  [/(require|import)\("(swift|rust):/, "native macOS module (swift:/rust: import)", "unsupported"],
   [/\bopen -a\b|\/Applications\/|~\/Library\/|\/Library\/Application Support/, "macOS paths or apps", "partial"],
   [/\bdefaults (read|write)\b|\bmdfind\b|\bmdls\b|\bpbcopy\b|\bpbpaste\b|\bscreencapture\b|\bafplay\b|\bcaffeinate\b/, "macOS command-line tools", "partial"],
   [/getSelectedFinderItems|Action\.ShowInFinder|showInFinder/, "Finder integration", "partial"],
