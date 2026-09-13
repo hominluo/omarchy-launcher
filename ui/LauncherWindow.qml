@@ -50,6 +50,14 @@ PanelWindow {
 
   ViewStack { id: stack }
 
+  // Providers finish asynchronously (scripts, windows, extension index); keep
+  // the root results current while the launcher is open.
+  Connections {
+    target: panel.service
+    ignoreUnknownSignals: true
+    function onIndexChanged() { if (panel.opened && panel.atRoot && panel.service) stack.render(panel.service.rootView(searchBar.text)) }
+  }
+
   readonly property var currentFrame: stack.current
   readonly property var currentView: stack.currentView
   readonly property bool atRoot: stack.depth <= 1
