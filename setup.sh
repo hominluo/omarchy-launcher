@@ -48,6 +48,29 @@ if (( WRITE_HOTKEY )); then
   python3 "$PLUGIN_DIR/bin/hotkeys.py" --apply
 fi
 
+# Register the launcher as the handler for raycast:// and omarchy-launcher://
+# links (extension deeplinks, OAuth redirects) unless another handler exists.
+APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPS_DIR"
+cat > "$APPS_DIR/omarchy-launcher-url-handler.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Omarchy Launcher URL Handler
+Exec=$PLUGIN_DIR/bin/launcher url %u
+NoDisplay=true
+Terminal=false
+MimeType=x-scheme-handler/omarchy-launcher;x-scheme-handler/raycast;x-scheme-handler/com.raycast;
+DESKTOP
+if command -v xdg-mime >/dev/null 2>&1; then
+  for scheme in x-scheme-handler/omarchy-launcher x-scheme-handler/raycast x-scheme-handler/com.raycast; do
+    current=$(xdg-mime query default "$scheme" 2>/dev/null || true)
+    if [[ -z $current || $current == omarchy-launcher-url-handler.desktop ]]; then
+      xdg-mime default omarchy-launcher-url-handler.desktop "$scheme" 2>/dev/null || true
+    fi
+  done
+fi
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+
 if omarchy plugin list 2>/dev/null | grep -q "^$PLUGIN_ID .*disabled"; then
   omarchy plugin enable "$PLUGIN_ID" --after omarchy.menu >/dev/null 2>&1 || omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 || true
   echo "Enabled $PLUGIN_ID"

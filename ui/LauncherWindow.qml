@@ -98,7 +98,10 @@ PanelWindow {
     panel.opened = true
     Qt.callLater(function() { searchBar.focusInput() })
 
-    if (payload && payload.command && panel.service && typeof panel.service.runCommandId === "function")
+    if (payload && payload.extension && panel.service) {
+      if (!panel.service.launchExtensionCommand(String(payload.extension), String(payload.command || ""), panel, { arguments: payload.arguments || {}, context: payload.context, fallbackText: payload.fallbackText, launchType: payload.launchType }))
+        panel.showToast({ style: "failure", title: "Extension command not found", message: payload.extension + "/" + payload.command })
+    } else if (payload && payload.command && panel.service && typeof panel.service.runCommandId === "function")
       panel.service.runCommandId(String(payload.command), panel, payload.arguments || {})
   }
 
