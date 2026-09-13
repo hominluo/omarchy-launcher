@@ -1,0 +1,10 @@
+{
+  "name": "omarchy-launcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Raycast-style launcher for the Omarchy shell",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

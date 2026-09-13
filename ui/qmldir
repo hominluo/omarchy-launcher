@@ -1,0 +1,9 @@
+LauncherWindow 1.0 LauncherWindow.qml
+ViewStack 1.0 ViewStack.qml
+SearchBar 1.0 SearchBar.qml
+ListPane 1.0 ListPane.qml
+ListRow 1.0 ListRow.qml
+IconGlyph 1.0 IconGlyph.qml
+StatusBar 1.0 StatusBar.qml
+KeyCap 1.0 KeyCap.qml
+EmptyView 1.0 EmptyView.qml

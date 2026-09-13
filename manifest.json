@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.hominluo.launcher",
+  "name": "Launcher",
+  "version": "0.1.0",
+  "author": "Homin Luo",
+  "license": "MIT",
+  "homepage": "https://github.com/hominluo/omarchy-launcher",
+  "description": "Raycast-style launcher for Omarchy: apps, commands, calculator, clipboard, snippets, window management, and a runtime for Raycast extensions.",
+  "kinds": [
+    "overlay",
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Launcher.qml",
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Launcher",
+    "description": "Bar button that opens the launcher.",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "icon": "󱓞"
+    },
+    "schema": [
+      {
+        "key": "icon",
+        "type": "string",
+        "label": "Bar icon glyph",
+        "defaultValue": "󱓞"
+      }
+    ]
+  }
+}
