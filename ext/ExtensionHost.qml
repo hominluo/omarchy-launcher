@@ -27,6 +27,8 @@ Item {
   property var pendingLaunch: null
   property string sidecarVersion: ""
   property string lastError: ""
+  property var aiProviders: []
+  property var aiChunkListener: null       // function(id, text)
 
   readonly property bool running: proc.running
   readonly property int liveSessions: Object.keys(sessions).length
@@ -50,8 +52,11 @@ Item {
     stdout: StdioCollector {
       onStreamFinished: {
         host.nodeBin = String(text || "").trim().split("\n")[0] || ""
-        if (host.nodeBin && host.pendingLaunch) { host.ensureRunning() }
-        else if (!host.nodeBin && host.pendingLaunch) { host.failLaunch("Node.js 22 or newer is required to run extensions. Install it with: omarchy pkg add nodejs npm") }
+        if (host.nodeBin && (host.pendingLaunch || host.readyWaiters.length)) { host.ensureRunning() }
+        else if (!host.nodeBin) {
+          if (host.pendingLaunch) host.failLaunch("Node.js 22 or newer is required to run extensions. Install it with: omarchy pkg add nodejs npm")
+          host.readyWaiters = []
+        }
       }
     }
   }
@@ -65,6 +70,7 @@ Item {
 
   function onExit(code, status) {
     host.ready = false
+    host.readyWaiters = []
     var pend = host.pending
     host.pending = ({})
     for (var id in pend) { try { pend[id].reject(new Error("sidecar exited")) } catch (e) {} }
@@ -88,9 +94,28 @@ Item {
 
   // ------------------------------------------------------------- rpc
 
+  // Start the runtime for a host-side request (AI) and run `fn` once ready.
+  function whenReady(fn) {
+    if (proc.running && host.ready) { fn(); return }
+    host.readyWaiters = host.readyWaiters.concat([fn])
+    host.ensureRunning()
+  }
+  property var readyWaiters: []
+
   function write(msg) { proc.write(JSON.stringify(msg) + "\n") }
   function notify(method, params) { if (proc.running) write({ jsonrpc: "2.0", method: method, params: params || {} }) }
   function request(method, params) {
+    if (!proc.running || !host.ready) {
+      return new Promise(function(resolve, reject) {
+        host.whenReady(function() { host.rawRequest(method, params).then(resolve, reject) })
+        if (!host.nodeBin && !nodeProbe.running) nodeProbe.running = true
+      })
+    }
+    return host.rawRequest(method, params)
+  }
+
+  // Send without waiting for the handshake (used by the handshake itself).
+  function rawRequest(method, params) {
     var id = host.nextId
     host.nextId += 2
     var resolveFn = null, rejectFn = null
@@ -132,7 +157,8 @@ Item {
 
   function handshake(params) {
     host.sidecarVersion = String(params.version || "")
-    host.request("manager.hello", {
+    host.aiProviders = Array.isArray(params.ai) ? params.ai : []
+    host.rawRequest("manager.hello", {
       protocol: 1, launcher: "0.1.0", shell: "omarchy-shell",
       paths: { data: host.dataDir, config: service.configDir, state: service.stateDir },
       env: { appearance: "dark", textSize: "medium" },
@@ -140,6 +166,9 @@ Item {
     }).then(function() {
       host.ready = true
       host.restartBackoffMs = 500
+      var waiters = host.readyWaiters
+      host.readyWaiters = []
+      for (var w = 0; w < waiters.length; w++) { try { waiters[w]() } catch (e) { console.warn("ext-host: ready waiter failed", e) } }
       if (host.pendingLaunch) { var l = host.pendingLaunch; host.pendingLaunch = null; host.doLaunch(l) }
     }, function(e) { console.warn("ext-host: hello failed", e) })
   }
@@ -272,6 +301,7 @@ Item {
         if (sess) { if (sess.panel && sess.viewIds.length === 0) sess.panel.hideToast(); host.endSession(sess.sessionId, "ended") }
         return
       case "manager.log": console.log("ext-host:", p.level, p.line); return
+      case "ai.chunk": if (host.aiChunkListener) host.aiChunkListener(String(p.id), String(p.text || "")); return
       case "ai.abort": return
       default: console.log("ext-host: unhandled notification", method)
     }
@@ -402,6 +432,11 @@ Item {
     property int offset: 0
     command: ["bash", "-c", "if [[ $1 == 0 ]]; then wl-paste --no-newline --type text 2>/dev/null; else jq -r --argjson i \"$1\" '.[$i].text // empty' \"$HOME/.local/state/omarchy/clipboard-history.json\" 2>/dev/null; fi", "--", String(offset)]
     stdout: StdioCollector { onStreamFinished: { if (clipboardRead.replyId !== null) { host.reply(clipboardRead.replyId, { text: String(text || "") }); clipboardRead.replyId = null } } }
+  }
+
+  function restartRuntime() {
+    if (proc.running) { host.wantRestart = true; proc.signal(15) }
+    else { host.aiProviders = []; host.ensureRunning() }
   }
 
   IpcHandler {

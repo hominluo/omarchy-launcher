@@ -31,7 +31,8 @@ BuiltinHost {
           row("hotkey", "Launcher Hotkey", String(s.hotkey || "SUPER + D"), "󰥻", function() { self.push(self.hotkeyForm({})) }),
           row("commands", "Commands", "Enable, alias, favorite, or bind a hotkey to any command", "󰘔", function() { self.push(self.commandsView("")) }),
           row("files", "File Search", "Search roots, excludes, hidden files", "󰱽", function() { self.push(self.filesForm({})) }),
-          row("calculator", "Calculator", "Angle unit for trigonometry", "󰃬", function() { self.push(self.calcForm()) })
+          row("calculator", "Calculator", "Angle unit for trigonometry", "󰃬", function() { self.push(self.calcForm()) }),
+          row("ai", "AI Providers", (service.extHost && service.extHost.aiProviders.length ? "Configured: " + service.extHost.aiProviders.join(", ") : "Anthropic, OpenAI-compatible, or Ollama"), "󰚩", function() { self.push(self.aiForm({})) })
         ] },
         { title: "Extensions", items: (service.extensions || []).map(function(ext) {
           return row("ext:" + ext.id, String(ext.title || ext.name), (ext.commands || []).length + " command(s) · " + (ext.compat && ext.compat.status ? ext.compat.status : "full"), ext.icon ? { kind: "image", value: "file://" + ext.icon } : "󰑣", function() { self.configureExtension(self.panel, ext, null, false) })
@@ -110,6 +111,7 @@ BuiltinHost {
 
   function formSubmit(viewId, actionId, values) {
     if (viewId === "prefs-extension") { extensionFormSubmit(values); return }
+    if (viewId === "prefs-ai") { aiFormSubmit(values); return }
     if (viewId === "prefs-hotkey") {
       var hk = String(values.hotkey || "").trim()
       if (!validHotkey(hk) || !hk) { host.render(hotkeyForm({ hotkey: "Use the form MOD + KEY, e.g. SUPER + D" })); return }
@@ -180,6 +182,53 @@ BuiltinHost {
       ],
       actions: { actions: [ { id: "save", title: "Save", kind: "submitForm" }, { id: "cancel", title: "Cancel", kind: "pop" } ] }
     }
+  }
+
+  property var aiConfig: ({})
+  function aiForm(errors) {
+    var c = host.aiConfig || {}
+    var p = c.providers || {}
+    return {
+      id: "prefs-ai", type: "form", navigationTitle: "AI Providers",
+      fields: [
+        { id: "default", field: "dropdown", title: "Default", value: String(c["default"] || "anthropic"), items: [ { value: "anthropic", title: "Anthropic (Claude)" }, { value: "openai", title: "OpenAI-compatible" }, { value: "ollama", title: "Ollama (local)" } ] },
+        { field: "separator" },
+        { id: "anthropicKey", field: "password", title: "Anthropic API key", value: String(p.anthropic && p.anthropic.apiKey || ""), info: "console.anthropic.com" },
+        { id: "anthropicModel", field: "text", title: "Anthropic model", value: String(p.anthropic && p.anthropic.model || ""), placeholder: "claude-sonnet-5" },
+        { field: "separator" },
+        { id: "openaiUrl", field: "text", title: "OpenAI-compatible URL", value: String(p.openai && p.openai.baseUrl || ""), placeholder: "https://api.openai.com/v1", info: "Also OpenRouter, Groq, or any compatible endpoint" },
+        { id: "openaiKey", field: "password", title: "API key", value: String(p.openai && p.openai.apiKey || "") },
+        { id: "openaiModel", field: "text", title: "Model", value: String(p.openai && p.openai.model || ""), placeholder: "gpt-4o-mini" },
+        { field: "separator" },
+        { id: "ollamaUrl", field: "text", title: "Ollama URL", value: String(p.ollama && p.ollama.baseUrl || ""), placeholder: "http://localhost:11434", info: "Leave empty to disable" },
+        { id: "ollamaModel", field: "text", title: "Ollama model", value: String(p.ollama && p.ollama.model || ""), placeholder: "llama3.2" }
+      ],
+      actions: { actions: [ { id: "save", title: "Save", kind: "submitForm" }, { id: "cancel", title: "Cancel", kind: "pop" } ] }
+    }
+  }
+
+  function aiFormSubmit(values) {
+    var providers = {}
+    if (String(values.anthropicKey || "").trim()) providers.anthropic = { apiKey: String(values.anthropicKey).trim(), model: String(values.anthropicModel || "").trim() || "claude-sonnet-5" }
+    if (String(values.openaiKey || "").trim()) providers.openai = { baseUrl: String(values.openaiUrl || "").trim() || "https://api.openai.com/v1", apiKey: String(values.openaiKey).trim(), model: String(values.openaiModel || "").trim() || "gpt-4o-mini" }
+    if (String(values.ollamaUrl || "").trim() || String(values.ollamaModel || "").trim()) providers.ollama = { baseUrl: String(values.ollamaUrl || "").trim() || "http://localhost:11434", model: String(values.ollamaModel || "").trim() || "llama3.2" }
+    var cfg = { "default": String(values["default"] || "anthropic"), providers: providers }
+    host.aiConfig = cfg
+    var file = service.configDir + "/ai.json"
+    Quickshell.execDetached(["bash", "-c", "umask 077; printf '%s\n' \"$2\" > \"$1\" && chmod 600 \"$1\"", "--", file, JSON.stringify(cfg, null, 2)])
+    host.toast("success", "AI providers saved", Object.keys(providers).length ? Object.keys(providers).join(", ") : "none")
+    host.pop()
+    // The runtime reads ai.json on each request; restart it so capabilities refresh.
+    if (service.extHost) Qt.callLater(function() { service.extHost.restartRuntime() })
+  }
+
+  FileView {
+    path: service ? service.configDir + "/ai.json" : ""
+    watchChanges: true
+    printErrors: false
+    onLoaded: { try { host.aiConfig = JSON.parse(text()) || {} } catch (e) { host.aiConfig = {} } }
+    onLoadFailed: host.aiConfig = {}
+    onFileChanged: reload()
   }
 
   function calcForm() {

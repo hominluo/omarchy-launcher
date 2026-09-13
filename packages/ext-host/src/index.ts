@@ -3,6 +3,7 @@
 import { isMainThread, Worker, workerData } from "node:worker_threads"
 import { Transport } from "./transport"
 import { PROTOCOL_VERSION, LoadParams } from "./protocol"
+import * as ai from "./ai/provider"
 
 if (!isMainThread) {
   require("./worker").runWorker(workerData)
@@ -23,6 +24,8 @@ function main() {
   process.title = "omarchy-launcher-ext-host"
   const transport = new Transport(process.stdin, process.stdout)
   const sessions = new Map<string, Session>()
+  const unloading = new Set<string>()
+  const aiAborts = new Map<string, AbortController>()
   let hostInfo: any = null
   let shuttingDown = false
 
@@ -31,7 +34,8 @@ function main() {
   transport.onRequest = async (method, params, id) => {
     switch (method) {
       case "manager.hello":
-        hostInfo = params || {}
+        hostInfo = Object.assign({}, params || {})
+        hostInfo.capabilities = Object.assign({}, hostInfo.capabilities || {}, { ai: ai.isConfigured() })
         if (hostInfo.protocol !== undefined && hostInfo.protocol < PROTOCOL_VERSION) throw new Error(`host protocol ${hostInfo.protocol} is older than ${PROTOCOL_VERSION}`)
         return { ok: true }
       case "manager.load":
@@ -45,7 +49,22 @@ function main() {
         setTimeout(() => process.exit(0), 200)
         return { ok: true }
       case "manager.status":
-        return { sessions: Array.from(sessions.values()).map((s) => ({ id: s.id, extension: s.params.extensionId, command: s.params.command.name, ready: s.ready })), rss: process.memoryUsage().rss }
+        return { sessions: Array.from(sessions.values()).map((s) => ({ id: s.id, extension: s.params.extensionId, command: s.params.command.name, ready: s.ready })), rss: process.memoryUsage().rss, ai: ai.configuredProviders() }
+      case "ai.status":
+        return { providers: ai.configuredProviders(), default: ai.resolve(null) }
+      case "ai.chat": {
+        // Host-side chat: params { id, messages:[{role,content}], model?, creativity?, system? }
+        const ctrl = new AbortController()
+        aiAborts.set(String(params.id), ctrl)
+        let text = ""
+        try {
+          for await (const chunk of ai.stream(params.messages || [], { model: params.model, creativity: params.creativity, system: params.system, signal: ctrl.signal })) {
+            text += chunk
+            transport.notify("ai.chunk", { id: params.id, text: chunk })
+          }
+        } finally { aiAborts.delete(String(params.id)) }
+        return { text }
+      }
       default:
         throw new Error("unknown method " + method)
     }
@@ -60,6 +79,7 @@ function main() {
       for (const sess of sessions.values()) sess.worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method, params } })
       return
     }
+    if (method === "ai.abort") { const c = aiAborts.get(String(params && params.id)); if (c) c.abort(); return }
     log("notification for unknown session: " + method)
   }
 
@@ -91,7 +111,14 @@ function main() {
     worker.stderr.on("data", (d) => process.stderr.write(`[${params.extensionId}] ${d}`))
     worker.on("message", (m: any) => {
       if (!m || typeof m !== "object") return
-      if (m.type === "rpc") { transport.write(m.msg); return }
+      if (m.type === "rpc") {
+        const msg = m.msg
+        // AI requests from extensions are served here, not by the shell.
+        if (msg && msg.method === "ai.ask" && msg.id !== undefined) { serveAiAsk(worker, msg); return }
+        if (msg && msg.method === "ai.abort") { const c = aiAborts.get(String(msg.params && msg.params.id)); if (c) c.abort(); return }
+        transport.write(msg)
+        return
+      }
       if (m.type === "ready") { session.ready = true; for (const w of session.readyWaiters) w(); session.readyWaiters = []; return }
       if (m.type === "log") { log(`[${params.extensionId}] ${m.line}`); return }
       if (m.type === "ended") { transport.notify("manager.sessionEnded", { s: params.s, reason: m.reason || "finished" }); unload(params.s, false); return }
@@ -103,7 +130,8 @@ function main() {
     })
     worker.on("exit", (code) => {
       if (sessions.get(params.s) === session) sessions.delete(params.s)
-      if (code !== 0 && !shuttingDown) transport.notify("manager.crash", { s: params.s, reason: "worker exited with code " + code, stack: "" })
+      const intentional = unloading.delete(params.s)
+      if (code !== 0 && !shuttingDown && !intentional) transport.notify("manager.crash", { s: params.s, reason: "worker exited with code " + code, stack: "" })
     })
 
     return new Promise((resolve, reject) => {
@@ -112,10 +140,27 @@ function main() {
     })
   }
 
+  async function serveAiAsk(worker: Worker, msg: any) {
+    const p = msg.params || {}
+    const ctrl = new AbortController()
+    aiAborts.set(String(p.id), ctrl)
+    let text = ""
+    try {
+      for await (const chunk of ai.stream([{ role: "user", content: String(p.prompt || "") }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
+        text += chunk
+        worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method: "ai.chunk", params: { id: p.id, text: chunk } } })
+      }
+      worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, result: { text } } })
+    } catch (e: any) {
+      worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: String(e && e.message || e) } } })
+    } finally { aiAborts.delete(String(p.id)) }
+  }
+
   function unload(sid: string, immediate: boolean) {
     const s = sessions.get(sid)
     if (!s) return
     sessions.delete(sid)
+    unloading.add(sid)
     try { s.worker.postMessage({ type: "unload" }) } catch {}
     const kill = () => { s.worker.terminate().catch(() => {}) }
     if (immediate) kill()
@@ -131,6 +176,7 @@ function main() {
     version: "0.1.0",
     node: process.version,
     pid: process.pid,
-    capabilities: ["view", "no-view", "oauth"]
+    capabilities: ["view", "no-view", "oauth", "ai"],
+    ai: ai.configuredProviders()
   })
 }

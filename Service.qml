@@ -83,6 +83,7 @@ Item {
     "focus": focusBuiltin,
     "reminders": remindersBuiltin,
     "colors": colorsBuiltin,
+    "ai": aiBuiltin,
     "calculator": null
   })
 
@@ -141,7 +142,7 @@ Item {
 
   function rebuildIndex() {
     var all = root.appEntries.concat(root.commandEntries)
-    var providers = [snippetsBuiltin, quicklinksBuiltin, windowsBuiltin, omarchyMenuBuiltin, scriptsBuiltin]
+    var providers = [snippetsBuiltin, quicklinksBuiltin, windowsBuiltin, omarchyMenuBuiltin, scriptsBuiltin, aiBuiltin]
     for (var p = 0; p < providers.length; p++) {
       if (providers[p] && typeof providers[p].rootEntries === "function") {
         try { all = all.concat(providers[p].rootEntries()) } catch (e) { console.warn("launcher: provider failed", e) }
@@ -272,6 +273,7 @@ Item {
       var strong = ranked.length && ranked[0].score >= 9000
       if (!strong || rows.length < 3) {
         var fb = quicklinksBuiltin.fallbackItems(q)
+        if (aiBuiltin.available && q.length >= 3) fb.unshift(aiBuiltin.quickRow(q))
         if (fb.length) sections.push({ id: "fallback", title: rows.length ? "Use “" + q + "” with…" : "", items: fb })
       }
     }
@@ -546,10 +548,11 @@ Item {
   Builtins.Focus { id: focusBuiltin; service: root }
   Builtins.Reminders { id: remindersBuiltin; service: root }
   Builtins.Colors { id: colorsBuiltin; service: root }
+  Builtins.Ai { id: aiBuiltin; service: root }
 
   // ------------------------------------------------------------- extensions
 
-  Ext.ExtensionHost { id: extensionHost; service: root }
+  Ext.ExtensionHost { id: extensionHost; service: root; aiChunkListener: function(id, text) { aiBuiltin.onChunk(id, text) } }
   readonly property var extHost: extensionHost
   property var extensions: []                 // from ~/.local/share/omarchy-launcher/extensions/index.json
   property var extensionSubtitles: ({})       // "ext/cmd" -> subtitle from updateCommandMetadata

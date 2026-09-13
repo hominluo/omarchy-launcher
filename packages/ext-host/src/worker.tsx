@@ -41,7 +41,7 @@ export function runWorker(data: { load: LoadParams; host: any }) {
       commandName: load.command.name, commandMode: load.command.mode,
       assetsPath: load.paths.assets, supportPath: load.paths.support,
       launchType: load.launchType, launchContext: load.launchContext,
-      capabilities: (data.host && data.host.capabilities) || {}
+      capabilities: Object.assign({}, (data.host && data.host.capabilities) || {}, { ai: !!(data.host && data.host.capabilities && data.host.capabilities.ai) })
     },
     preferences: load.preferences || {},
     navigation: null,

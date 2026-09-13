@@ -2034,8 +2034,8 @@ var require_react_reconciler_production = __commonJS({
           currentEntangledActionThenable = {
             status: "pending",
             value: void 0,
-            then: function(resolve) {
-              entangledListeners.push(resolve);
+            then: function(resolve2) {
+              entangledListeners.push(resolve2);
             }
           };
         }
@@ -2058,8 +2058,8 @@ var require_react_reconciler_production = __commonJS({
           status: "pending",
           value: null,
           reason: null,
-          then: function(resolve) {
-            listeners.push(resolve);
+          then: function(resolve2) {
+            listeners.push(resolve2);
           }
         };
         thenable.then(
@@ -11344,7 +11344,7 @@ function contentOf(content) {
   return { text: content.text !== void 0 ? String(content.text) : "", html: content.html ? String(content.html) : void 0, file: content.file ? String(content.file) : void 0 };
 }
 function store() {
-  if (!localStore) localStore = new JsonStore(path.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
+  if (!localStore) localStore = new JsonStore(path2.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
   return localStore;
 }
 function flushStorage() {
@@ -11402,11 +11402,11 @@ async function updateCommandMetadata(metadata2) {
   const client2 = getClient();
   client2.notify("command.updateMetadata", { s: client2.sessionId, subtitle: metadata2 && metadata2.subtitle !== void 0 ? metadata2.subtitle : null });
 }
-var fs, path, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
+var fs2, path2, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
 var init_services = __esm({
   "src/api/services.ts"() {
-    fs = __toESM(require("node:fs"));
-    path = __toESM(require("node:path"));
+    fs2 = __toESM(require("node:fs"));
+    path2 = __toESM(require("node:path"));
     import_node_events = require("node:events");
     init_client();
     init_enums();
@@ -11576,7 +11576,7 @@ var init_services = __esm({
       load() {
         if (this.data) return this.data;
         try {
-          this.data = JSON.parse(fs.readFileSync(this.file, "utf8"));
+          this.data = JSON.parse(fs2.readFileSync(this.file, "utf8"));
         } catch {
           this.data = {};
         }
@@ -11587,8 +11587,8 @@ var init_services = __esm({
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
           try {
-            fs.mkdirSync(path.dirname(this.file), { recursive: true });
-            fs.writeFileSync(this.file, JSON.stringify(this.data));
+            fs2.mkdirSync(path2.dirname(this.file), { recursive: true });
+            fs2.writeFileSync(this.file, JSON.stringify(this.data));
           } catch (e) {
             getClient().log("storage write failed: " + e);
           }
@@ -11617,8 +11617,8 @@ var init_services = __esm({
           clearTimeout(this.timer);
           this.timer = null;
           try {
-            fs.mkdirSync(path.dirname(this.file), { recursive: true });
-            fs.writeFileSync(this.file, JSON.stringify(this.data || {}));
+            fs2.mkdirSync(path2.dirname(this.file), { recursive: true });
+            fs2.writeFileSync(this.file, JSON.stringify(this.data || {}));
           } catch {
           }
         }
@@ -11654,35 +11654,35 @@ var init_services = __esm({
       constructor(options) {
         const ns = options && options.namespace ? String(options.namespace).replace(/[^A-Za-z0-9._-]/g, "_") : "default";
         this.capacity = options && options.capacity ? Number(options.capacity) : 10 * 1024 * 1024;
-        this.dir = path.join(getClient().env.supportPath, ".launcher", "cache", ns);
+        this.dir = path2.join(getClient().env.supportPath, ".launcher", "cache", ns);
         try {
-          fs.mkdirSync(this.dir, { recursive: true });
+          fs2.mkdirSync(this.dir, { recursive: true });
         } catch {
         }
       }
       fileFor(key) {
-        return path.join(this.dir, Buffer.from(String(key)).toString("base64url"));
+        return path2.join(this.dir, Buffer.from(String(key)).toString("base64url"));
       }
       get(key) {
         try {
-          return fs.readFileSync(this.fileFor(key), "utf8");
+          return fs2.readFileSync(this.fileFor(key), "utf8");
         } catch {
           return void 0;
         }
       }
       has(key) {
-        return fs.existsSync(this.fileFor(key));
+        return fs2.existsSync(this.fileFor(key));
       }
       get isEmpty() {
         try {
-          return fs.readdirSync(this.dir).length === 0;
+          return fs2.readdirSync(this.dir).length === 0;
         } catch {
           return true;
         }
       }
       set(key, data) {
         try {
-          fs.writeFileSync(this.fileFor(key), String(data));
+          fs2.writeFileSync(this.fileFor(key), String(data));
         } catch (e) {
           getClient().log("cache write failed: " + e);
         }
@@ -11692,7 +11692,7 @@ var init_services = __esm({
       remove(key) {
         let removed = false;
         try {
-          fs.unlinkSync(this.fileFor(key));
+          fs2.unlinkSync(this.fileFor(key));
           removed = true;
         } catch {
         }
@@ -11701,7 +11701,7 @@ var init_services = __esm({
       }
       clear(options) {
         try {
-          for (const f of fs.readdirSync(this.dir)) fs.unlinkSync(path.join(this.dir, f));
+          for (const f of fs2.readdirSync(this.dir)) fs2.unlinkSync(path2.join(this.dir, f));
         } catch {
         }
         if (!(options && options.notifySubscribers === false)) for (const s of this.subscribers) s(void 0, void 0);
@@ -11714,8 +11714,8 @@ var init_services = __esm({
       }
       evict() {
         try {
-          const entries = fs.readdirSync(this.dir).map((f) => {
-            const st = fs.statSync(path.join(this.dir, f));
+          const entries = fs2.readdirSync(this.dir).map((f) => {
+            const st = fs2.statSync(path2.join(this.dir, f));
             return { f, size: st.size, atime: st.atimeMs };
           });
           let total = entries.reduce((a, e) => a + e.size, 0);
@@ -11724,7 +11724,7 @@ var init_services = __esm({
           for (const e of entries) {
             if (total <= this.capacity) break;
             try {
-              fs.unlinkSync(path.join(this.dir, e.f));
+              fs2.unlinkSync(path2.join(this.dir, e.f));
               total -= e.size;
             } catch {
             }
@@ -11742,13 +11742,13 @@ var init_services = __esm({
         const client2 = getClient();
         const emitter = new import_node_events.EventEmitter();
         const id = "ai" + Math.random().toString(36).slice(2);
-        const stream = new Promise((resolve, reject) => {
-          aiStreams.set(id, { emitter, resolve, reject, text: "" });
+        const stream2 = new Promise((resolve2, reject) => {
+          aiStreams.set(id, { emitter, resolve: resolve2, reject, text: "" });
           client2.request("ai.ask", { s: client2.sessionId, id, prompt: String(prompt), model: options && options.model ? String(options.model) : null, creativity: options && options.creativity !== void 0 ? options.creativity : null }, 3e5).then((r) => {
             const st = aiStreams.get(id);
             if (st) {
               aiStreams.delete(id);
-              resolve(String(r && r.text !== void 0 ? r.text : st.text));
+              resolve2(String(r && r.text !== void 0 ? r.text : st.text));
             }
           }, (e) => {
             aiStreams.delete(id);
@@ -11756,7 +11756,7 @@ var init_services = __esm({
           });
         });
         if (options && options.signal) options.signal.addEventListener("abort", () => client2.notify("ai.abort", { s: client2.sessionId, id }));
-        return Object.assign(stream, { on: emitter.on.bind(emitter), once: emitter.once.bind(emitter), off: emitter.off.bind(emitter), emit: emitter.emit.bind(emitter), addListener: emitter.addListener.bind(emitter), removeListener: emitter.removeListener.bind(emitter) });
+        return Object.assign(stream2, { on: emitter.on.bind(emitter), once: emitter.once.bind(emitter), off: emitter.off.bind(emitter), emit: emitter.emit.bind(emitter), addListener: emitter.addListener.bind(emitter), removeListener: emitter.removeListener.bind(emitter) });
       }
     };
     aiStreams = /* @__PURE__ */ new Map();
@@ -11801,7 +11801,7 @@ var init_services = __esm({
           this.providerIcon = options.providerIcon;
           this.providerId = String(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
           this.description = String(options.description || "");
-          this.tokenFile = path.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
+          this.tokenFile = path2.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
         }
         get redirectURL() {
           if (this.redirectMethod === "app") return "raycast://oauth?package_name=Extension";
@@ -11832,7 +11832,7 @@ var init_services = __esm({
         }
         async getTokens() {
           try {
-            const data = JSON.parse(fs.readFileSync(this.tokenFile, "utf8"));
+            const data = JSON.parse(fs2.readFileSync(this.tokenFile, "utf8"));
             return { ...data, isExpired: () => data.expiresIn ? Date.now() > (data.updatedAt || 0) + Number(data.expiresIn) * 1e3 - 1e4 : false };
           } catch {
             return void 0;
@@ -11840,12 +11840,12 @@ var init_services = __esm({
         }
         async setTokens(tokens) {
           const data = { accessToken: tokens.accessToken || tokens.access_token, refreshToken: tokens.refreshToken || tokens.refresh_token, idToken: tokens.idToken || tokens.id_token, expiresIn: tokens.expiresIn || tokens.expires_in, scope: tokens.scope, updatedAt: Date.now() };
-          fs.mkdirSync(path.dirname(this.tokenFile), { recursive: true });
-          fs.writeFileSync(this.tokenFile, JSON.stringify(data), { mode: 384 });
+          fs2.mkdirSync(path2.dirname(this.tokenFile), { recursive: true });
+          fs2.writeFileSync(this.tokenFile, JSON.stringify(data), { mode: 384 });
         }
         async removeTokens() {
           try {
-            fs.unlinkSync(this.tokenFile);
+            fs2.unlinkSync(this.tokenFile);
           } catch {
           }
         }
@@ -11981,8 +11981,8 @@ function runWorker(data) {
     sessionId: sid,
     request(method, params) {
       const id = `${sid}:${++nextId}`;
-      return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+      return new Promise((resolve2, reject) => {
+        pending.set(id, { resolve: resolve2, reject });
         post({ jsonrpc: "2.0", id, method, params: { s: sid, ...params || {} } });
       });
     },
@@ -12004,7 +12004,7 @@ function runWorker(data) {
       supportPath: load.paths.support,
       launchType: load.launchType,
       launchContext: load.launchContext,
-      capabilities: data.host && data.host.capabilities || {}
+      capabilities: Object.assign({}, data.host && data.host.capabilities || {}, { ai: !!(data.host && data.host.capabilities && data.host.capabilities.ai) })
     },
     preferences: load.preferences || {},
     navigation: null,
@@ -12012,7 +12012,7 @@ function runWorker(data) {
   };
   setClient(client2);
   try {
-    fs2.mkdirSync(load.paths.support, { recursive: true });
+    fs3.mkdirSync(load.paths.support, { recursive: true });
   } catch {
   }
   port.on("message", (m) => {
@@ -12259,11 +12259,11 @@ function runWorker(data) {
     return !(fn.constructor && fn.constructor.name === "AsyncFunction");
   }
 }
-var import_node_worker_threads, fs2, React2;
+var import_node_worker_threads, fs3, React2;
 var init_worker = __esm({
   "src/worker.tsx"() {
     import_node_worker_threads = require("node:worker_threads");
-    fs2 = __toESM(require("node:fs"));
+    fs3 = __toESM(require("node:fs"));
     React2 = __toESM(require_react());
     init_client();
     init_patch_require();
@@ -12347,13 +12347,13 @@ var Transport = class {
   }
   request(method, params, timeoutMs = 3e4) {
     const id = this.idPrefix ? `${this.idPrefix}${this.nextId += 2}` : this.nextId += 2;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error(`timeout: ${method}`));
       }, timeoutMs);
       this.pending.set(id, { resolve: (v) => {
         clearTimeout(timer);
-        resolve(v);
+        resolve2(v);
       }, reject: (e) => {
         clearTimeout(timer);
         reject(e);
@@ -12373,6 +12373,164 @@ var Transport = class {
 // src/protocol.ts
 var PROTOCOL_VERSION = 1;
 
+// src/ai/provider.ts
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_path = __toESM(require("node:path"));
+var CONFIG_PATH = import_node_path.default.join(import_node_os.default.homedir(), ".config", "omarchy-launcher", "ai.json");
+var DEFAULT_MODELS = { anthropic: "claude-sonnet-5", openai: "gpt-4o-mini", ollama: "llama3.2" };
+function loadConfig() {
+  try {
+    const d = JSON.parse(import_node_fs.default.readFileSync(CONFIG_PATH, "utf8"));
+    return d && typeof d === "object" ? d : {};
+  } catch {
+    return {};
+  }
+}
+function configuredProviders(cfg = loadConfig()) {
+  const out = [];
+  const p = cfg.providers || {};
+  if (p.anthropic && p.anthropic.apiKey) out.push("anthropic");
+  if (p.openai && p.openai.apiKey) out.push("openai");
+  if (p.ollama) out.push("ollama");
+  return out;
+}
+function isConfigured() {
+  return configuredProviders().length > 0;
+}
+function temperature(creativity) {
+  if (creativity === void 0 || creativity === null) return void 0;
+  if (typeof creativity === "number") return Math.max(0, Math.min(2, creativity));
+  return { none: 0, low: 0.3, medium: 0.7, high: 1, maximum: 1.2 }[String(creativity)] ?? void 0;
+}
+function resolve(requested, cfg = loadConfig()) {
+  const providers = cfg.providers || {};
+  const available = configuredProviders(cfg);
+  if (!available.length) return null;
+  let provider = cfg.default && available.indexOf(cfg.default) >= 0 ? cfg.default : available[0];
+  let model = "";
+  const req = String(requested || "");
+  const colon = req.indexOf(":");
+  if (colon > 0 && available.indexOf(req.slice(0, colon)) >= 0) {
+    provider = req.slice(0, colon);
+    model = req.slice(colon + 1);
+  } else if (req) {
+    const map = cfg.modelMap || {};
+    for (const prefix of Object.keys(map)) {
+      if (prefix !== "*" && req.startsWith(prefix) && available.indexOf(map[prefix]) >= 0) {
+        provider = map[prefix];
+        break;
+      }
+    }
+    if (!Object.keys(map).length) {
+      if (/^Anthropic_/i.test(req) && available.indexOf("anthropic") >= 0) provider = "anthropic";
+      else if (/^OpenAI_/i.test(req) && available.indexOf("openai") >= 0) provider = "openai";
+    }
+  }
+  const config = providers[provider] || {};
+  return { provider, model: model || config.model || DEFAULT_MODELS[provider], config };
+}
+async function* stream(messages, options = {}) {
+  const r = resolve(options.model);
+  if (!r) throw new Error("No AI provider is configured. Add one to ~/.config/omarchy-launcher/ai.json");
+  const temp = temperature(options.creativity);
+  if (r.provider === "anthropic") yield* anthropic(messages, r.model, r.config, temp, options);
+  else if (r.provider === "ollama") yield* ollama(messages, r.model, r.config, temp, options);
+  else yield* openai(messages, r.model, r.config, temp, options);
+}
+async function* sse(res) {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      let event = "message", data = "";
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trim();
+      }
+      if (data) yield { event, data };
+    }
+  }
+}
+async function* anthropic(messages, model, cfg, temp, options) {
+  const system = [options.system || "", ...messages.filter((m) => m.role === "system").map((m) => m.content)].filter(Boolean).join("\n\n");
+  const body = { model, max_tokens: cfg.maxTokens || 2048, stream: true, messages: messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })) };
+  if (system) body.system = system;
+  if (temp !== void 0) body.temperature = Math.min(1, temp);
+  const res = await fetch((cfg.baseUrl || "https://api.anthropic.com") + "/v1/messages", {
+    method: "POST",
+    signal: options.signal,
+    headers: { "content-type": "application/json", "x-api-key": String(cfg.apiKey), "anthropic-version": "2023-06-01" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  for await (const ev of sse(res)) {
+    if (ev.event === "content_block_delta") {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.delta && d.delta.type === "text_delta" && d.delta.text) yield String(d.delta.text);
+      } catch {
+      }
+    } else if (ev.event === "error") throw new Error("Anthropic stream error: " + ev.data);
+  }
+}
+async function* openai(messages, model, cfg, temp, options) {
+  const msgs = (options.system ? [{ role: "system", content: options.system }] : []).concat(messages);
+  const body = { model, stream: true, messages: msgs };
+  if (temp !== void 0) body.temperature = temp;
+  const res = await fetch((cfg.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "") + "/chat/completions", {
+    method: "POST",
+    signal: options.signal,
+    headers: { "content-type": "application/json", "authorization": "Bearer " + String(cfg.apiKey || "") },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`OpenAI-compatible API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  for await (const ev of sse(res)) {
+    if (ev.data === "[DONE]") break;
+    try {
+      const d = JSON.parse(ev.data);
+      const t = d.choices && d.choices[0] && d.choices[0].delta && d.choices[0].delta.content;
+      if (t) yield String(t);
+    } catch {
+    }
+  }
+}
+async function* ollama(messages, model, cfg, temp, options) {
+  const msgs = (options.system ? [{ role: "system", content: options.system }] : []).concat(messages);
+  const body = { model, stream: true, messages: msgs };
+  if (temp !== void 0) body.options = { temperature: temp };
+  const res = await fetch((cfg.baseUrl || "http://localhost:11434").replace(/\/$/, "") + "/api/chat", { method: "POST", signal: options.signal, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const d = JSON.parse(line);
+        if (d.message && d.message.content) yield String(d.message.content);
+        if (d.done) return;
+      } catch {
+      }
+    }
+  }
+}
+
 // src/index.ts
 if (!import_node_worker_threads2.isMainThread) {
   (init_worker(), __toCommonJS(worker_exports)).runWorker(import_node_worker_threads2.workerData);
@@ -12383,13 +12541,16 @@ function main() {
   process.title = "omarchy-launcher-ext-host";
   const transport = new Transport(process.stdin, process.stdout);
   const sessions = /* @__PURE__ */ new Map();
+  const unloading = /* @__PURE__ */ new Set();
+  const aiAborts = /* @__PURE__ */ new Map();
   let hostInfo = null;
   let shuttingDown = false;
   const log = (line) => process.stderr.write("[ext-host] " + line + "\n");
   transport.onRequest = async (method, params, id) => {
     switch (method) {
       case "manager.hello":
-        hostInfo = params || {};
+        hostInfo = Object.assign({}, params || {});
+        hostInfo.capabilities = Object.assign({}, hostInfo.capabilities || {}, { ai: isConfigured() });
         if (hostInfo.protocol !== void 0 && hostInfo.protocol < PROTOCOL_VERSION) throw new Error(`host protocol ${hostInfo.protocol} is older than ${PROTOCOL_VERSION}`);
         return { ok: true };
       case "manager.load":
@@ -12403,7 +12564,23 @@ function main() {
         setTimeout(() => process.exit(0), 200);
         return { ok: true };
       case "manager.status":
-        return { sessions: Array.from(sessions.values()).map((s) => ({ id: s.id, extension: s.params.extensionId, command: s.params.command.name, ready: s.ready })), rss: process.memoryUsage().rss };
+        return { sessions: Array.from(sessions.values()).map((s) => ({ id: s.id, extension: s.params.extensionId, command: s.params.command.name, ready: s.ready })), rss: process.memoryUsage().rss, ai: configuredProviders() };
+      case "ai.status":
+        return { providers: configuredProviders(), default: resolve(null) };
+      case "ai.chat": {
+        const ctrl = new AbortController();
+        aiAborts.set(String(params.id), ctrl);
+        let text = "";
+        try {
+          for await (const chunk of stream(params.messages || [], { model: params.model, creativity: params.creativity, system: params.system, signal: ctrl.signal })) {
+            text += chunk;
+            transport.notify("ai.chunk", { id: params.id, text: chunk });
+          }
+        } finally {
+          aiAborts.delete(String(params.id));
+        }
+        return { text };
+      }
       default:
         throw new Error("unknown method " + method);
     }
@@ -12426,6 +12603,11 @@ function main() {
     }
     if (method === "oauth.callback") {
       for (const sess of sessions.values()) sess.worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method, params } });
+      return;
+    }
+    if (method === "ai.abort") {
+      const c = aiAborts.get(String(params && params.id));
+      if (c) c.abort();
       return;
     }
     log("notification for unknown session: " + method);
@@ -12456,7 +12638,17 @@ function main() {
     worker.on("message", (m) => {
       if (!m || typeof m !== "object") return;
       if (m.type === "rpc") {
-        transport.write(m.msg);
+        const msg = m.msg;
+        if (msg && msg.method === "ai.ask" && msg.id !== void 0) {
+          serveAiAsk(worker, msg);
+          return;
+        }
+        if (msg && msg.method === "ai.abort") {
+          const c = aiAborts.get(String(msg.params && msg.params.id));
+          if (c) c.abort();
+          return;
+        }
+        transport.write(msg);
         return;
       }
       if (m.type === "ready") {
@@ -12482,20 +12674,39 @@ function main() {
     });
     worker.on("exit", (code) => {
       if (sessions.get(params.s) === session) sessions.delete(params.s);
-      if (code !== 0 && !shuttingDown) transport.notify("manager.crash", { s: params.s, reason: "worker exited with code " + code, stack: "" });
+      const intentional = unloading.delete(params.s);
+      if (code !== 0 && !shuttingDown && !intentional) transport.notify("manager.crash", { s: params.s, reason: "worker exited with code " + code, stack: "" });
     });
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const timer = setTimeout(() => reject(new Error("handshake_timeout")), 5e3);
       session.readyWaiters.push(() => {
         clearTimeout(timer);
-        resolve({ ok: true });
+        resolve2({ ok: true });
       });
     });
+  }
+  async function serveAiAsk(worker, msg) {
+    const p = msg.params || {};
+    const ctrl = new AbortController();
+    aiAborts.set(String(p.id), ctrl);
+    let text = "";
+    try {
+      for await (const chunk of stream([{ role: "user", content: String(p.prompt || "") }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
+        text += chunk;
+        worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method: "ai.chunk", params: { id: p.id, text: chunk } } });
+      }
+      worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, result: { text } } });
+    } catch (e) {
+      worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, error: { code: -32e3, message: String(e && e.message || e) } } });
+    } finally {
+      aiAborts.delete(String(p.id));
+    }
   }
   function unload(sid, immediate) {
     const s = sessions.get(sid);
     if (!s) return;
     sessions.delete(sid);
+    unloading.add(sid);
     try {
       s.worker.postMessage({ type: "unload" });
     } catch {
@@ -12518,7 +12729,8 @@ function main() {
     version: "0.1.0",
     node: process.version,
     pid: process.pid,
-    capabilities: ["view", "no-view", "oauth"]
+    capabilities: ["view", "no-view", "oauth", "ai"],
+    ai: configuredProviders()
   });
 }
 //# sourceMappingURL=ext-host.js.map
