@@ -1,0 +1,5 @@
+{ "name": "ticker", "title": "Ticker (test)", "description": "Local test extension", "icon": "icon.png", "author": "test", "platforms": ["macOS", "Windows"],
+  "commands": [
+    { "name": "ticker", "title": "Ticker List", "description": "A list that grows", "mode": "view" },
+    { "name": "menubar", "title": "Ticker Menu Bar", "description": "A menu-bar counter", "mode": "menu-bar", "interval": "10m" }
+  ] }

@@ -56,6 +56,10 @@ PanelWindow {
     target: panel.service
     ignoreUnknownSignals: true
     function onIndexChanged() { if (panel.opened && panel.atRoot && panel.service) stack.render(panel.service.rootView(searchBar.text)) }
+    function onMenubarsChanged() {
+      var v = stack.currentView
+      if (panel.opened && v && String(v.id).indexOf("menubar:") === 0) stack.render(panel.service.menubarView(String(v.id).slice(8)))
+    }
   }
 
   readonly property var currentFrame: stack.current

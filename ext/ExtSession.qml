@@ -13,6 +13,8 @@ QtObject {
   property var viewIds: []            // shell-side view ids, in push order
   property int nextView: 1
   property bool ended: false
+  property bool menuBar: false        // a menu-bar command: lives in the bar, not the window
+  property var menubarRoot: null      // last rendered menubar view model
 
   function viewKey(sidecarView) { return "ext:" + session.sessionId + ":" + sidecarView }
   function sidecarView(viewKey) { return String(viewKey).replace("ext:" + session.sessionId + ":", "") }

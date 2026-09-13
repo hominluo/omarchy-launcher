@@ -177,8 +177,47 @@ Item {
 
   function sessionFor(params) { return params && params.s ? host.sessions[String(params.s)] : null }
 
+  // ---- menu-bar commands: persistent sessions shown in the bar widget
+
+  property var menubars: []          // [{ key, sessionId, title, icon, tooltip, isLoading, items }]
+  property var menubarTimers: ({})
+
+  function menubarKey(ext, cmd) { return ext.id + "/" + cmd.name }
+
+  function launchMenuBar(ext, cmd) {
+    var key = menubarKey(ext, cmd)
+    // Replace a running session for the same command.
+    for (var sid in host.sessions) if (host.sessions[sid].menuBar && host.sessions[sid].extensionId + "/" + host.sessions[sid].commandName === key) host.endSession(sid, "replaced")
+    var launchSpec = { ext: ext, cmd: cmd, win: null, args: { launchType: "userInitiated" }, menuBar: true }
+    if (!proc.running || !host.ready) { host.whenReady(function() { host.doLaunch(launchSpec) }); if (!host.nodeBin && !nodeProbe.running) nodeProbe.running = true; return }
+    host.doLaunch(launchSpec)
+  }
+
+  function stopMenuBar(key) {
+    for (var sid in host.sessions) if (host.sessions[sid].menuBar && host.sessions[sid].extensionId + "/" + host.sessions[sid].commandName === key) host.endSession(sid, "stopped")
+    host.updateMenubars()
+  }
+
+  function updateMenubars() {
+    var out = []
+    for (var sid in host.sessions) {
+      var sess = host.sessions[sid]
+      if (!sess.menuBar) continue
+      var r = sess.menubarRoot
+      out.push({ key: sess.extensionId + "/" + sess.commandName, sessionId: sid, title: r ? String(r.title || "") : "", icon: r ? r.icon : null, tooltip: r ? String(r.tooltip || sess.title) : sess.title, isLoading: r ? r.isLoading === true : true, items: r ? r.items : [] })
+    }
+    out.sort(function(a, b) { return a.key.localeCompare(b.key) })
+    host.menubars = out
+  }
+
+  function menubarSession(key) {
+    for (var sid in host.sessions) if (host.sessions[sid].menuBar && host.sessions[sid].extensionId + "/" + host.sessions[sid].commandName === key) return host.sessions[sid]
+    return null
+  }
+
   // Launch an extension command: called from the Service's extension entries.
   function launch(ext, cmd, win, args) {
+    if (cmd.mode === "menu-bar") { host.launchMenuBar(ext, cmd); if (win) win.showToast({ style: "success", title: "Added to the bar", message: cmd.title }); return }
     var launchSpec = { ext: ext, cmd: cmd, win: win, args: args || {} }
     if (!proc.running || !host.ready) {
       host.pendingLaunch = launchSpec
@@ -199,21 +238,31 @@ Item {
   function doLaunch(l) {
     var win = l.win
     // Replace the "starting" placeholder if one is showing.
-    if (win.currentView && win.currentView.id === "ext-loading") win.popView()
+    if (win && win.currentView && win.currentView.id === "ext-loading") win.popView()
     host.sessionSerial += 1
     var sid = "s" + host.sessionSerial
-    var sess = sessionComponent.createObject(host, { host: host, sessionId: sid, extensionId: l.ext.id, commandName: l.cmd.name, title: l.cmd.title, panel: win })
+    var sess = sessionComponent.createObject(host, { host: host, sessionId: sid, extensionId: l.ext.id, commandName: l.cmd.name, title: l.cmd.title, panel: win, menuBar: l.menuBar === true })
     var next = ({})
     for (var k in host.sessions) next[k] = host.sessions[k]
     next[sid] = sess
     host.sessions = next
     idleTimer.stop()
 
-    if (l.cmd.mode !== "no-view") {
+    if (l.menuBar) {
+      host.updateMenubars()
+      var interval = intervalSeconds(l.cmd.interval)
+      if (interval > 0) {
+        var key0 = host.menubarKey(l.ext, l.cmd)
+        var timers = host.menubarTimers
+        if (timers[key0]) timers[key0].destroy()
+        timers[key0] = refreshTimerComponent.createObject(host, { interval: interval * 1000, ext: l.ext, cmd: l.cmd })
+        host.menubarTimers = timers
+      }
+    } else if (l.cmd.mode !== "no-view") {
       var key = sess.viewKey("v0")
       sess.viewIds = [key]
       win.pushView({ id: key, type: "list", navigationTitle: l.cmd.title, searchBarPlaceholder: l.cmd.title, isLoading: true, filtering: false, items: [] }, sess)
-    } else {
+    } else if (win) {
       win.showToast({ style: "animated", title: "Running " + l.cmd.title + "…" })
     }
 
@@ -233,8 +282,26 @@ Item {
       paths: { assets: l.ext.dir + "/assets", support: host.supportDir + "/" + l.ext.id.replace("/", "__") }
     }).then(function() {}, function(e) {
       host.endSession(sid, "load-failed")
+      console.warn("ext-host: load failed", l.ext.id, l.cmd.name, e)
       if (win) { if (!win.atRoot) win.popView(); win.showToast({ style: "failure", title: "Extension failed to start", message: String(e && e.message || e).slice(0, 120) }) }
     })
+  }
+
+  Component {
+    id: refreshTimerComponent
+    Timer {
+      property var ext: null
+      property var cmd: null
+      repeat: true
+      running: true
+      onTriggered: if (ext && cmd) host.launchMenuBar(ext, cmd)
+    }
+  }
+
+  function intervalSeconds(raw) {
+    var m = String(raw || "").match(/^(\d+)\s*([smhd])$/)
+    if (!m) return 0
+    return Math.max(60, Number(m[1]) * ({ s: 1, m: 60, h: 3600, d: 86400 })[m[2]])
   }
 
   function endSession(sid, reason) {
@@ -246,13 +313,24 @@ Item {
     sess.ended = true
     host.notify("manager.unload", { s: sid })
     if (host.liveSessions === 0) idleTimer.restart()
+    var wasMenuBar = sess.menuBar
     sess.destroy()
+    if (wasMenuBar) host.updateMenubars()
   }
 
   // The window closed: extension sessions end (Raycast unloads commands too).
   function onWindowClosed() {
     var ids = Object.keys(host.sessions)
-    for (var i = 0; i < ids.length; i++) { host.notify("ui.closed", { s: ids[i] }); host.endSession(ids[i], "closed") }
+    for (var i = 0; i < ids.length; i++) {
+      if (host.sessions[ids[i]].menuBar) continue
+      host.notify("ui.closed", { s: ids[i] }); host.endSession(ids[i], "closed")
+    }
+  }
+
+  // A menu-bar item was chosen from the launcher's item list.
+  function menubarInvoke(key, callbackId) {
+    var sess = host.menubarSession(key)
+    if (sess && callbackId) host.notify("ui.callback", { s: sess.sessionId, h: String(callbackId), args: [] })
   }
 
   // ------------------------------------------------------------- sidecar -> host
@@ -261,8 +339,14 @@ Item {
     var sess = sessionFor(p)
     switch (method) {
       case "ui.render": {
-        if (!sess || sess.ended || !sess.panel) return
+        if (!sess || sess.ended) return
         var views = p.views || []
+        if (sess.menuBar) {
+          for (var mi = 0; mi < views.length; mi++) if (views[mi].root && views[mi].root.type === "menubar") sess.menubarRoot = views[mi].root
+          host.updateMenubars()
+          return
+        }
+        if (!sess.panel) return
         for (var i = 0; i < views.length; i++) {
           var key = sess.viewKey(views[i].view)
           var root = views[i].root

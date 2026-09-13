@@ -37,6 +37,7 @@ Item {
     var payload = {}
     try { payload = JSON.parse(payloadJson || "{}") || {} } catch (e) { payload = {} }
     window.summon(payload)
+    if (payload.menubar && root.core) window.pushView(root.core.menubarView(String(payload.menubar)), null)
   }
 
   function close() { window.opened = false }

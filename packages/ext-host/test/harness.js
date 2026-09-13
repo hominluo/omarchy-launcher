@@ -5,7 +5,8 @@ const { spawn } = require("node:child_process")
 const path = require("node:path")
 const readline = require("node:readline")
 
-const [extDir, command, mode = "view", seconds = "8"] = process.argv.slice(2)
+const [extDirArg, command, mode = "view", seconds = "8"] = process.argv.slice(2)
+const extDir = extDirArg && path.resolve(extDirArg)
 if (!extDir || !command) { console.error("usage: harness <extensionDir> <command> [mode] [seconds]"); process.exit(1) }
 const bundle = path.resolve(__dirname, "../../../runtime/ext-host.js")
 const child = spawn(process.execPath, [bundle], { stdio: ["pipe", "pipe", "inherit"] })

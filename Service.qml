@@ -575,24 +575,31 @@ Item {
       for (var j = 0; j < (ext.commands || []).length; j++) {
         var cmd = ext.commands[j]
         var compat = cmd.compat && cmd.compat.status ? cmd.compat.status : "full"
-        var unsupported = compat === "unsupported" || cmd.mode === "menu-bar"
+        var unsupported = compat === "unsupported"
         var subtitleKey = ext.id + "/" + cmd.name
         out.push({
           id: "ext:" + ext.id + "/" + cmd.name,
           kind: "extension",
           title: String(cmd.title || cmd.name),
-          subtitle: unsupported ? (cmd.mode === "menu-bar" ? "Menu-bar commands are not supported yet" : "macOS only") : String(root.extensionSubtitles[subtitleKey] || cmd.subtitle || ""),
+          subtitle: unsupported ? "macOS only" : (cmd.mode === "menu-bar" ? (root.menuBarActive(ext.id + "/" + cmd.name) ? "In the bar" : "Menu-bar command") : String(root.extensionSubtitles[subtitleKey] || cmd.subtitle || "")),
           keywords: (cmd.keywords || []).concat([ext.title || "", ext.name || "", cmd.description || ""]),
           aliases: [], baseAliases: [],
           icon: cmd.icon ? { kind: "image", value: "file://" + cmd.icon } : (ext.icon ? { kind: "image", value: "file://" + ext.icon } : "󰑣"),
           accessoryText: String(ext.title || ext.name),
           enabled: !unsupported && cmd.disabledByDefault !== true,
           favorite: false,
-          primaryTitle: cmd.mode === "no-view" ? "Run" : "Open",
+          primaryTitle: cmd.mode === "no-view" ? "Run" : (cmd.mode === "menu-bar" ? (root.menuBarActive(ext.id + "/" + cmd.name) ? "Show Items" : "Add to Bar") : "Open"),
           extension: ext,
           command: cmd,
           run: function(e, win) {
             if (root.missingRequiredPrefs(e.extension, e.command).length) { preferencesBuiltin.configureExtension(win, e.extension, e.command, true); return true }
+            if (e.command.mode === "menu-bar") {
+              var key = e.extension.id + "/" + e.command.name
+              if (root.menuBarActive(key)) { win.pushView(root.menubarView(key), null); return true }
+              root.setMenuBarActive(key, true)
+              win.showToast({ style: "success", title: "Added to the bar", message: e.command.title })
+              return true
+            }
             extensionHost.launch(e.extension, e.command, win, {})
             return true
           }
@@ -682,6 +689,53 @@ Item {
   }
 
   function onWindowClosed() { extensionHost.onWindowClosed() }
+
+  // ---- menu-bar commands: which ones the user keeps in the bar (settings.menuBarCommands)
+  readonly property var menubars: extensionHost.menubars
+  function menuBarActive(key) { var l = root.settings && root.settings.menuBarCommands; return Array.isArray(l) && l.indexOf(key) >= 0 }
+  function setMenuBarActive(key, active) {
+    var l = (root.settings && Array.isArray(root.settings.menuBarCommands) ? root.settings.menuBarCommands : []).filter(function(k) { return k !== key })
+    if (active) l.push(key)
+    root.setSetting("menuBarCommands", l)
+    var parts = key.split("/")
+    var ext = root.findExtension(parts[0] + "/" + parts[1])
+    var cmd = ext ? (ext.commands || []).filter(function(c) { return c.name === parts[2] })[0] : null
+    if (active && ext && cmd) extensionHost.launchMenuBar(ext, cmd)
+    if (!active) extensionHost.stopMenuBar(key)
+  }
+  function startMenuBars() {
+    var l = root.settings && Array.isArray(root.settings.menuBarCommands) ? root.settings.menuBarCommands : []
+    for (var i = 0; i < l.length; i++) {
+      var parts = String(l[i]).split("/")
+      var ext = root.findExtension(parts[0] + "/" + parts[1])
+      var cmd = ext ? (ext.commands || []).filter(function(c) { return c.name === parts[2] })[0] : null
+      if (ext && cmd && !extensionHost.menubarSession(l[i])) extensionHost.launchMenuBar(ext, cmd)
+    }
+  }
+  property bool menuBarsStarted: false
+  onExtensionsChanged: if (root.extensions.length && !root.menuBarsStarted && root.settings) { root.menuBarsStarted = true; Qt.callLater(root.startMenuBars) }
+
+  // Items of a menu-bar command as a list view for the launcher window.
+  function menubarView(key) {
+    var mb = null
+    for (var i = 0; i < root.menubars.length; i++) if (root.menubars[i].key === key) mb = root.menubars[i]
+    var items = []
+    var self = root
+    var walk = function(list, section) {
+      for (var j = 0; j < (list || []).length; j++) {
+        var it = list[j]
+        if (it.kind === "item") items.push({ id: "mb" + items.length, title: String(it.title || ""), subtitle: String(it.subtitle || ""), icon: it.icon || null, data: { cb: it.callbackId }, keywords: [section],
+          actions: { sections: [{ actions: [ { id: "run", title: "Run", run: function(item) { self.extHost.menubarInvoke(key, item.data.cb); return false } } ] }] } })
+        else if (it.kind === "submenu" || it.kind === "section") walk(it.items, String(it.title || section))
+      }
+    }
+    if (mb) walk(mb.items, "")
+    var parts = key.split("/")
+    var cmdTitle = mb ? (mb.tooltip || mb.title || key) : key
+    return { id: "menubar:" + key, type: "list", navigationTitle: cmdTitle, searchBarPlaceholder: "Search…", filtering: true, isLoading: mb ? mb.isLoading : true, items: items,
+      emptyView: { icon: "󰍜", title: mb ? "No items" : "Not running" },
+      actions: { actions: [ { id: "remove", title: "Remove from Bar", style: "destructive", run: function() { self.setMenuBarActive(key, false); return false } } ] } }
+  }
 
   // Raycast icon names -> Nerd Font glyphs (data/icons.json).
   property var raycastIcons: ({})
