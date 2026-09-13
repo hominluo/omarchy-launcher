@@ -100,6 +100,11 @@ launcher ext update                         # every store extension
 launcher ext remove thomas/hacker-news
 ```
 
+Extensions can also be built from source, which needs `npm` (the build uses
+the esbuild that ships with `@raycast/api`): a local checkout, any git URL
+(`#subdir` optional), or a folder of the official repo, e.g.
+`launcher ext install https://github.com/raycast/extensions/tree/main/extensions/hacker-news`.
+
 `launcher` lives in `bin/` of the plugin; add it to your `PATH` or call it
 by path. Extensions land in `~/.local/share/omarchy-launcher/extensions/`,
 their data in `…/support/`, their preferences in
@@ -125,7 +130,8 @@ Commands ("Copy Deeplink" in any action panel copies a ready-made call).
 ## Script Commands
 
 Drop Raycast-format scripts into `~/.config/omarchy-launcher/scripts/`
-(or add folders under `scriptDirs` in `settings.json`):
+(or add folders under `scriptDirs` in `settings.json`); `examples/scripts/`
+has two to start from:
 
 ```bash
 #!/bin/bash
