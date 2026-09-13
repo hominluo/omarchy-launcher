@@ -28,6 +28,7 @@ Item {
 
   signal activateRequested(string itemId)
   signal selectionChanged(string itemId)
+  signal loadMoreRequested()
 
   ListModel { id: rowModel }
 
@@ -87,6 +88,7 @@ Item {
     pane.selectedIndex = (pane.selectedIndex + delta + rowModel.count) % rowModel.count
     revealCursor()
     pane.selectionChanged(selectedItemId())
+    if (pane.selectedIndex >= rowModel.count - 3) pane.loadMoreRequested()
   }
 
   function page(direction) {

@@ -1,0 +1,16 @@
+{
+  "id": "fixture-form", "type": "form", "navigationTitle": "Fixture: Form",
+  "fields": [
+    { "id": "title", "field": "text", "title": "Title", "placeholder": "Something short", "autoFocus": true, "info": "Required" },
+    { "id": "secret", "field": "password", "title": "Token", "placeholder": "••••••" },
+    { "id": "body", "field": "textarea", "title": "Notes", "placeholder": "Multi-line text; Ctrl+Enter submits" },
+    { "id": "urgent", "field": "checkbox", "title": "Priority", "label": "Mark as urgent", "defaultValue": true },
+    { "id": "project", "field": "dropdown", "title": "Project", "defaultValue": "work", "items": [ { "value": "work", "title": "Work" }, { "value": "home", "title": "Home" } ] },
+    { "id": "tags", "field": "tags", "title": "Tags", "items": [ { "value": "a", "title": "Alpha" }, { "value": "b", "title": "Beta" } ] },
+    { "id": "file", "field": "file", "title": "Attachment", "files": true },
+    { "field": "separator" },
+    { "id": "d", "field": "description", "text": "Descriptions explain what the form does." },
+    { "id": "bad", "field": "text", "title": "Invalid", "value": "oops", "error": "This value is not allowed" }
+  ],
+  "actions": { "actions": [ { "id": "submit", "title": "Create", "kind": "submitForm" }, { "id": "cancel", "title": "Cancel", "kind": "pop" } ] }
+}

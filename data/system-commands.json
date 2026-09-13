@@ -1,38 +1,419 @@
 [
-  { "id": "lock", "title": "Lock Screen", "keywords": ["lock", "screen", "away"], "icon": "󰍁", "exec": "omarchy-system-lock" },
-  { "id": "sleep", "title": "Sleep", "subtitle": "Suspend to RAM", "keywords": ["suspend", "sleep", "standby"], "icon": "󰤄", "exec": "systemctl suspend" },
-  { "id": "hibernate", "title": "Hibernate", "keywords": ["hibernate", "suspend to disk"], "icon": "󰤄", "exec": "systemctl hibernate", "when": "omarchy-hibernation-available", "confirm": "Hibernate now?" },
-  { "id": "logout", "title": "Log Out", "keywords": ["logout", "sign out", "exit session"], "icon": "󰍃", "exec": "omarchy-system-logout", "confirm": "Log out and close all windows?" },
-  { "id": "reboot", "title": "Restart", "keywords": ["reboot", "restart"], "icon": "󰜉", "exec": "omarchy-system-reboot", "confirm": "Restart the computer?" },
-  { "id": "shutdown", "title": "Shut Down", "keywords": ["shutdown", "power off", "halt"], "icon": "󰤂", "exec": "omarchy-system-shutdown", "confirm": "Shut down the computer?" },
-  { "id": "screensaver", "title": "Start Screensaver", "keywords": ["screensaver", "screen saver"], "icon": "󰖔", "exec": "omarchy-launch-screensaver force" },
-  { "id": "empty-trash", "title": "Empty Trash", "keywords": ["trash", "delete", "bin"], "icon": "󰧧", "exec": "gio trash --empty", "confirm": "Empty the trash?" },
-  { "id": "open-trash", "title": "Open Trash", "keywords": ["trash", "bin"], "icon": "󰧧", "exec": "xdg-open trash:///" },
-  { "id": "nightlight", "title": "Toggle Night Light", "keywords": ["night", "light", "warm", "blue light", "hyprsunset"], "icon": "󰖔", "exec": "omarchy-toggle-nightlight", "checked": "omarchy-toggle-nightlight --status" },
-  { "id": "dnd", "title": "Toggle Do Not Disturb", "keywords": ["notifications", "silence", "dnd", "focus"], "icon": "󰂜", "exec": "omarchy-toggle-notification-silencing" },
-  { "id": "stay-awake", "title": "Toggle Stay Awake", "subtitle": "Prevent idle lock and sleep", "keywords": ["idle", "caffeine", "awake", "insomnia"], "icon": "󰛊", "exec": "omarchy-toggle-idle toggle" },
-  { "id": "toggle-bar", "title": "Toggle Bar", "keywords": ["bar", "waybar", "top bar", "hide"], "icon": "󰍜", "exec": "omarchy-toggle-bar" },
-  { "id": "volume-up", "title": "Volume Up", "keywords": ["volume", "audio", "louder"], "icon": "󰕾", "exec": "omarchy-audio-output-volume raise", "keepOpen": true },
-  { "id": "volume-down", "title": "Volume Down", "keywords": ["volume", "audio", "quieter"], "icon": "󰕾", "exec": "omarchy-audio-output-volume lower", "keepOpen": true },
-  { "id": "volume-mute", "title": "Toggle Mute", "keywords": ["mute", "volume", "audio", "silence"], "icon": "󰖁", "exec": "omarchy-audio-output-volume mute-toggle" },
-  { "id": "mic-mute", "title": "Toggle Microphone Mute", "keywords": ["microphone", "mic", "mute", "input"], "icon": "󰍭", "exec": "omarchy-audio-input-mute" },
-  { "id": "audio-output-switch", "title": "Switch Audio Output", "keywords": ["audio", "output", "speaker", "headphones", "sink"], "icon": "󰋎", "exec": "omarchy-audio-output-switch" },
-  { "id": "media-play-pause", "title": "Play / Pause", "keywords": ["media", "music", "play", "pause"], "icon": "󰐎", "exec": "playerctl play-pause" },
-  { "id": "media-next", "title": "Next Track", "keywords": ["media", "music", "next", "skip"], "icon": "󰒭", "exec": "playerctl next" },
-  { "id": "media-previous", "title": "Previous Track", "keywords": ["media", "music", "previous"], "icon": "󰒮", "exec": "playerctl previous" },
-  { "id": "brightness-up", "title": "Brightness Up", "keywords": ["brightness", "screen", "display", "brighter"], "icon": "󰃟", "exec": "omarchy-brightness-display +10%", "keepOpen": true },
-  { "id": "brightness-down", "title": "Brightness Down", "keywords": ["brightness", "screen", "display", "dimmer"], "icon": "󰃟", "exec": "omarchy-brightness-display 10%-", "keepOpen": true },
-  { "id": "wifi-on", "title": "Turn Wi-Fi On", "keywords": ["wifi", "wireless", "network", "enable"], "icon": "󰖩", "exec": "nmcli radio wifi on" },
-  { "id": "wifi-off", "title": "Turn Wi-Fi Off", "keywords": ["wifi", "wireless", "network", "disable", "airplane"], "icon": "󰖩", "exec": "nmcli radio wifi off" },
-  { "id": "bluetooth-toggle", "title": "Toggle Bluetooth", "keywords": ["bluetooth", "bt", "wireless"], "icon": "󰂯", "exec": "omarchy-bluetooth-power toggle" },
-  { "id": "theme-next-background", "title": "Next Background", "keywords": ["wallpaper", "background", "theme"], "icon": "󰥶", "exec": "omarchy-theme-bg-next" },
-  { "id": "theme-switcher", "title": "Change Theme", "keywords": ["theme", "colors", "appearance", "style"], "icon": "󰏘", "exec": "omarchy-theme-switcher" },
-  { "id": "background-switcher", "title": "Change Background", "keywords": ["wallpaper", "background", "picture"], "icon": "󰥶", "exec": "omarchy-theme-bg-switcher" },
-  { "id": "window-transparency", "title": "Toggle Window Transparency", "keywords": ["transparent", "opacity", "window"], "icon": "󰌁", "exec": "omarchy-hyprland-window-transparency-toggle" },
-  { "id": "window-gaps", "title": "Toggle Window Gaps", "keywords": ["gaps", "tiling", "window"], "icon": "󰁌", "exec": "omarchy-hyprland-window-gaps-toggle" },
-  { "id": "restart-shell", "title": "Restart Omarchy Shell", "keywords": ["shell", "restart", "quickshell", "bar"], "icon": "󰜉", "exec": "omarchy-restart-shell" },
-  { "id": "omarchy-update", "title": "Update Omarchy", "keywords": ["update", "upgrade", "system", "pacman"], "icon": "󰚰", "exec": "omarchy-launch-floating-terminal-with-presentation omarchy-update" },
-  { "id": "reminder", "title": "Set Reminder", "subtitle": "omarchy reminder", "keywords": ["reminder", "remind", "alarm", "timer"], "icon": "󰀠", "exec": "omarchy-reminder --interactive" },
-  { "id": "text-size", "title": "Text Size", "subtitle": "Scale text everywhere", "keywords": ["font", "size", "scale", "zoom", "hidpi"], "icon": "󰛖", "exec": "omarchy-launch-floating-terminal-with-presentation omarchy-display-text-size" },
-  { "id": "keybindings", "title": "Show Keybindings", "keywords": ["keys", "shortcuts", "hotkeys", "bindings"], "icon": "󰥻", "exec": "omarchy-menu-keybindings" }
+  {
+    "id": "lock",
+    "title": "Lock Screen",
+    "keywords": [
+      "lock",
+      "screen",
+      "away"
+    ],
+    "icon": "󰍁",
+    "exec": "omarchy-system-lock"
+  },
+  {
+    "id": "sleep",
+    "title": "Sleep",
+    "subtitle": "Suspend to RAM",
+    "keywords": [
+      "suspend",
+      "sleep",
+      "standby"
+    ],
+    "icon": "󰤄",
+    "exec": "systemctl suspend"
+  },
+  {
+    "id": "hibernate",
+    "title": "Hibernate",
+    "keywords": [
+      "hibernate",
+      "suspend to disk"
+    ],
+    "icon": "󰤄",
+    "exec": "systemctl hibernate",
+    "when": "omarchy-hibernation-available",
+    "confirm": "Hibernate now?"
+  },
+  {
+    "id": "logout",
+    "title": "Log Out",
+    "keywords": [
+      "logout",
+      "sign out",
+      "exit session"
+    ],
+    "icon": "󰍃",
+    "exec": "omarchy-system-logout",
+    "confirm": "Log out and close all windows?"
+  },
+  {
+    "id": "reboot",
+    "title": "Restart",
+    "keywords": [
+      "reboot",
+      "restart"
+    ],
+    "icon": "󰜉",
+    "exec": "omarchy-system-reboot",
+    "confirm": "Restart the computer?"
+  },
+  {
+    "id": "shutdown",
+    "title": "Shut Down",
+    "keywords": [
+      "shutdown",
+      "power off",
+      "halt"
+    ],
+    "icon": "󰤂",
+    "exec": "omarchy-system-shutdown",
+    "confirm": "Shut down the computer?"
+  },
+  {
+    "id": "screensaver",
+    "title": "Start Screensaver",
+    "keywords": [
+      "screensaver",
+      "screen saver"
+    ],
+    "icon": "󰖔",
+    "exec": "omarchy-launch-screensaver force"
+  },
+  {
+    "id": "empty-trash",
+    "title": "Empty Trash",
+    "keywords": [
+      "trash",
+      "delete",
+      "bin"
+    ],
+    "icon": "󰧧",
+    "exec": "gio trash --empty",
+    "confirm": "Empty the trash?"
+  },
+  {
+    "id": "open-trash",
+    "title": "Open Trash",
+    "keywords": [
+      "trash",
+      "bin"
+    ],
+    "icon": "󰧧",
+    "exec": "xdg-open trash:///"
+  },
+  {
+    "id": "nightlight",
+    "title": "Toggle Night Light",
+    "keywords": [
+      "night",
+      "light",
+      "warm",
+      "blue light",
+      "hyprsunset"
+    ],
+    "icon": "󰖔",
+    "exec": "omarchy-toggle-nightlight",
+    "checked": "omarchy-toggle-nightlight --status"
+  },
+  {
+    "id": "dnd",
+    "title": "Toggle Do Not Disturb",
+    "keywords": [
+      "notifications",
+      "silence",
+      "dnd",
+      "focus"
+    ],
+    "icon": "󰂜",
+    "exec": "omarchy-toggle-notification-silencing"
+  },
+  {
+    "id": "stay-awake",
+    "title": "Toggle Stay Awake",
+    "subtitle": "Prevent idle lock and sleep",
+    "keywords": [
+      "idle",
+      "caffeine",
+      "awake",
+      "insomnia"
+    ],
+    "icon": "󰛊",
+    "exec": "omarchy-toggle-idle toggle"
+  },
+  {
+    "id": "toggle-bar",
+    "title": "Toggle Bar",
+    "keywords": [
+      "bar",
+      "waybar",
+      "top bar",
+      "hide"
+    ],
+    "icon": "󰍜",
+    "exec": "omarchy-toggle-bar"
+  },
+  {
+    "id": "volume-up",
+    "title": "Volume Up",
+    "keywords": [
+      "volume",
+      "audio",
+      "louder"
+    ],
+    "icon": "󰕾",
+    "exec": "omarchy-audio-output-volume raise",
+    "keepOpen": true
+  },
+  {
+    "id": "volume-down",
+    "title": "Volume Down",
+    "keywords": [
+      "volume",
+      "audio",
+      "quieter"
+    ],
+    "icon": "󰕾",
+    "exec": "omarchy-audio-output-volume lower",
+    "keepOpen": true
+  },
+  {
+    "id": "volume-mute",
+    "title": "Toggle Mute",
+    "keywords": [
+      "mute",
+      "volume",
+      "audio",
+      "silence"
+    ],
+    "icon": "󰖁",
+    "exec": "omarchy-audio-output-volume mute-toggle"
+  },
+  {
+    "id": "mic-mute",
+    "title": "Toggle Microphone Mute",
+    "keywords": [
+      "microphone",
+      "mic",
+      "mute",
+      "input"
+    ],
+    "icon": "󰍭",
+    "exec": "omarchy-audio-input-mute"
+  },
+  {
+    "id": "audio-output-switch",
+    "title": "Switch Audio Output",
+    "keywords": [
+      "audio",
+      "output",
+      "speaker",
+      "headphones",
+      "sink"
+    ],
+    "icon": "󰋎",
+    "exec": "omarchy-audio-output-switch"
+  },
+  {
+    "id": "media-play-pause",
+    "title": "Play / Pause",
+    "keywords": [
+      "media",
+      "music",
+      "play",
+      "pause"
+    ],
+    "icon": "󰐎",
+    "exec": "playerctl play-pause"
+  },
+  {
+    "id": "media-next",
+    "title": "Next Track",
+    "keywords": [
+      "media",
+      "music",
+      "next",
+      "skip"
+    ],
+    "icon": "󰒭",
+    "exec": "playerctl next"
+  },
+  {
+    "id": "media-previous",
+    "title": "Previous Track",
+    "keywords": [
+      "media",
+      "music",
+      "previous"
+    ],
+    "icon": "󰒮",
+    "exec": "playerctl previous"
+  },
+  {
+    "id": "brightness-up",
+    "title": "Brightness Up",
+    "keywords": [
+      "brightness",
+      "screen",
+      "display",
+      "brighter"
+    ],
+    "icon": "󰃟",
+    "exec": "omarchy-brightness-display +10%",
+    "keepOpen": true
+  },
+  {
+    "id": "brightness-down",
+    "title": "Brightness Down",
+    "keywords": [
+      "brightness",
+      "screen",
+      "display",
+      "dimmer"
+    ],
+    "icon": "󰃟",
+    "exec": "omarchy-brightness-display 10%-",
+    "keepOpen": true
+  },
+  {
+    "id": "wifi-on",
+    "title": "Turn Wi-Fi On",
+    "keywords": [
+      "wifi",
+      "wireless",
+      "network",
+      "enable"
+    ],
+    "icon": "󰖩",
+    "exec": "nmcli radio wifi on"
+  },
+  {
+    "id": "wifi-off",
+    "title": "Turn Wi-Fi Off",
+    "keywords": [
+      "wifi",
+      "wireless",
+      "network",
+      "disable",
+      "airplane"
+    ],
+    "icon": "󰖩",
+    "exec": "nmcli radio wifi off"
+  },
+  {
+    "id": "bluetooth-toggle",
+    "title": "Toggle Bluetooth",
+    "keywords": [
+      "bluetooth",
+      "bt",
+      "wireless"
+    ],
+    "icon": "󰂯",
+    "exec": "omarchy-bluetooth-power toggle"
+  },
+  {
+    "id": "theme-next-background",
+    "title": "Next Background",
+    "keywords": [
+      "wallpaper",
+      "background",
+      "theme"
+    ],
+    "icon": "󰥶",
+    "exec": "omarchy-theme-bg-next"
+  },
+  {
+    "id": "theme-switcher",
+    "title": "Change Theme",
+    "keywords": [
+      "theme",
+      "colors",
+      "appearance",
+      "style"
+    ],
+    "icon": "󰏘",
+    "exec": "omarchy-theme-switcher"
+  },
+  {
+    "id": "background-switcher",
+    "title": "Change Background",
+    "keywords": [
+      "wallpaper",
+      "background",
+      "picture"
+    ],
+    "icon": "󰥶",
+    "exec": "omarchy-theme-bg-switcher"
+  },
+  {
+    "id": "window-transparency",
+    "title": "Toggle Window Transparency",
+    "keywords": [
+      "transparent",
+      "opacity",
+      "window"
+    ],
+    "icon": "󰌁",
+    "exec": "omarchy-hyprland-window-transparency-toggle"
+  },
+  {
+    "id": "window-gaps",
+    "title": "Toggle Window Gaps",
+    "keywords": [
+      "gaps",
+      "tiling",
+      "window"
+    ],
+    "icon": "󰁌",
+    "exec": "omarchy-hyprland-window-gaps-toggle"
+  },
+  {
+    "id": "restart-shell",
+    "title": "Restart Omarchy Shell",
+    "keywords": [
+      "shell",
+      "restart",
+      "quickshell",
+      "bar"
+    ],
+    "icon": "󰜉",
+    "exec": "omarchy-restart-shell"
+  },
+  {
+    "id": "omarchy-update",
+    "title": "Update Omarchy",
+    "keywords": [
+      "update",
+      "upgrade",
+      "system",
+      "pacman"
+    ],
+    "icon": "󰚰",
+    "exec": "omarchy-launch-floating-terminal-with-presentation omarchy-update"
+  },
+  {
+    "id": "text-size",
+    "title": "Text Size",
+    "subtitle": "Scale text everywhere",
+    "keywords": [
+      "font",
+      "size",
+      "scale",
+      "zoom",
+      "hidpi"
+    ],
+    "icon": "󰛖",
+    "exec": "omarchy-launch-floating-terminal-with-presentation omarchy-display-text-size"
+  },
+  {
+    "id": "keybindings",
+    "title": "Show Keybindings",
+    "keywords": [
+      "keys",
+      "shortcuts",
+      "hotkeys",
+      "bindings"
+    ],
+    "icon": "󰥻",
+    "exec": "omarchy-menu-keybindings"
+  }
 ]

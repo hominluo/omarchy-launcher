@@ -21,7 +21,11 @@ Item {
   readonly property var core: service ? service : (shell && typeof shell.serviceFor === "function" ? shell.serviceFor(pluginId) : null)
   readonly property bool opened: window.opened
 
-  onOpenedChanged: if (root.core) root.core.windowOpen = root.opened
+  onOpenedChanged: {
+    if (!root.core) return
+    root.core.windowOpen = root.opened
+    if (!root.opened && typeof root.core.onWindowClosed === "function") root.core.onWindowClosed()
+  }
 
 
   // Payload routes:
@@ -53,4 +57,12 @@ Item {
     id: window
     launcher: root
   }
+
+  Ui.NotesWindow {
+    id: notes
+    service: root.core
+  }
+
+  onCoreChanged: if (root.core) root.core.notesWindow = notes
+  Component.onCompleted: if (root.core) root.core.notesWindow = notes
 }

@@ -15,6 +15,8 @@ BorderSurface {
   required property string iconKind
   required property string iconValue
   required property string accessoryText
+  required property string accessoryIcon
+  required property string accessoryColor
 
   property bool hasCursor: false
   property var iconResolver: null
@@ -34,6 +36,7 @@ BorderSurface {
   color: hasCursor ? selectedBackground : "transparent"
   borderSpec: hasCursor ? selectedBorderSpec : Border.none()
 
+  property string iconTint: ""
   IconGlyph {
     id: icon
     anchors.left: parent.left
@@ -41,6 +44,7 @@ BorderSurface {
     anchors.verticalCenter: parent.verticalCenter
     kind: row.iconKind
     value: row.iconValue
+    tint: row.iconTint
     iconResolver: row.iconResolver
     foreground: row.textColor
     fontFamily: row.fontFamily
@@ -83,6 +87,21 @@ BorderSurface {
     }
   }
 
+  IconGlyph {
+    id: trailingIcon
+    anchors.right: trailing.visible ? trailing.left : parent.right
+    anchors.rightMargin: trailing.visible ? Style.space(5) : row.horizontalInset + Style.space(6)
+    anchors.verticalCenter: parent.verticalCenter
+    visible: row.accessoryIcon.length > 0
+    kind: row.accessoryIcon.length ? row.accessoryIcon.split("|")[0] : ""
+    value: row.accessoryIcon.length ? row.accessoryIcon.slice(row.accessoryIcon.indexOf("|") + 1) : ""
+    iconResolver: row.iconResolver
+    foreground: row.accessoryColor ? row.accessoryColor : row.foreground
+    fontFamily: row.fontFamily
+    size: Style.space(15)
+    opacity: row.accessoryColor ? 1 : 0.55
+  }
+
   Text {
     id: trailing
     anchors.right: parent.right
@@ -90,8 +109,8 @@ BorderSurface {
     anchors.verticalCenter: parent.verticalCenter
     text: row.accessoryText
     visible: text.length > 0
-    color: row.foreground
-    opacity: 0.5
+    color: row.accessoryColor ? row.accessoryColor : row.foreground
+    opacity: row.accessoryColor ? 0.95 : 0.5
     font.family: row.fontFamily
     font.pixelSize: Style.font.bodySmall
     textFormat: Text.PlainText

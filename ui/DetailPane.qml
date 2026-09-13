@@ -13,6 +13,11 @@ Item {
   property string fontFamily: Style.font.menuFamily
   property real padding: Style.space(14)
 
+  function scrollBy(lines) {
+    var step = Style.space(24) * lines
+    flick.contentY = Math.max(0, Math.min(Math.max(0, flick.contentHeight - flick.height), flick.contentY + step))
+  }
+
   Flickable {
     id: flick
     anchors.fill: parent

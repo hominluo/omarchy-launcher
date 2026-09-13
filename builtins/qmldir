@@ -8,3 +8,11 @@ Files 1.0 Files.qml
 ShellCommand 1.0 ShellCommand.qml
 OmarchyMenu 1.0 OmarchyMenu.qml
 SystemCommands 1.0 SystemCommands.qml
+Emoji 1.0 Emoji.qml
+DevFixtures 1.0 DevFixtures.qml
+Preferences 1.0 Preferences.qml
+Scripts 1.0 Scripts.qml
+Notes 1.0 Notes.qml
+Focus 1.0 Focus.qml
+Reminders 1.0 Reminders.qml
+Colors 1.0 Colors.qml

@@ -1,0 +1,17 @@
+{
+  "name": "@omarchy-launcher/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "launcher CLI: install Raycast extensions, manage the runtime",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

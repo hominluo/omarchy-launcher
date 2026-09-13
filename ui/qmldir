@@ -10,3 +10,6 @@ EmptyView 1.0 EmptyView.qml
 ActionPanel 1.0 ActionPanel.qml
 Toast 1.0 Toast.qml
 DetailPane 1.0 DetailPane.qml
+GridPane 1.0 GridPane.qml
+FormPane 1.0 FormPane.qml
+NotesWindow 1.0 NotesWindow.qml

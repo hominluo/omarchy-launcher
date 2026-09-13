@@ -1,0 +1,19 @@
+{
+  "id": "fixture-grid", "type": "grid", "columns": 6, "aspectRatio": "1", "inset": "small",
+  "navigationTitle": "Fixture: Grid", "searchBarPlaceholder": "Filter colours…",
+  "sections": [
+    { "title": "Palette", "items": [
+      { "id": "red", "title": "Red", "content": { "color": "#e06c75" }, "actions": { "actions": [ { "id": "pick", "title": "Pick", "kind": "callback" } ] } },
+      { "id": "green", "title": "Green", "content": { "color": "#98c379" } },
+      { "id": "blue", "title": "Blue", "content": { "color": "#61afef" } },
+      { "id": "yellow", "title": "Yellow", "content": { "color": "#e5c07b" } },
+      { "id": "purple", "title": "Purple", "content": { "color": "#c678dd" } },
+      { "id": "cyan", "title": "Cyan", "content": { "color": "#56b6c2" } }
+    ] },
+    { "title": "Icons", "items": [
+      { "id": "rocket", "title": "Rocket", "content": { "icon": "󰑣" } },
+      { "id": "emoji", "title": "Emoji", "content": { "icon": "🚀" } },
+      { "id": "app", "title": "App icon", "content": { "icon": { "kind": "app", "value": "firefox" } } }
+    ] }
+  ]
+}

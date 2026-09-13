@@ -1,0 +1,25 @@
+{
+  "name": "@omarchy-launcher/ext-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node sidecar that runs Raycast extensions for the Omarchy Launcher",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test": "node test/harness.js"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-reconciler": "0.34.0"
+  },
+  "devDependencies": {
+    "@raycast/api": "2.3.1",
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "@types/react-reconciler": "0.32.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

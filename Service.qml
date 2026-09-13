@@ -8,6 +8,7 @@ import "lib/Apps.js" as Apps
 import "lib/Calc.js" as Calc
 import "lib/Units.js" as Units
 import "builtins" as Builtins
+import "ext" as Ext
 
 // Headless core of the launcher, mounted once at shell start and kept alive
 // while the window is hidden. Owns the search index (apps, commands, and
@@ -74,6 +75,14 @@ Item {
     "files": filesBuiltin,
     "shell": shellBuiltin,
     "omarchy-menu": omarchyMenuBuiltin,
+    "emoji": emojiBuiltin,
+    "dev-fixtures": devFixturesBuiltin,
+    "preferences": preferencesBuiltin,
+    "scripts": scriptsBuiltin,
+    "notes": notesBuiltin,
+    "focus": focusBuiltin,
+    "reminders": remindersBuiltin,
+    "colors": colorsBuiltin,
     "calculator": null
   })
 
@@ -132,12 +141,13 @@ Item {
 
   function rebuildIndex() {
     var all = root.appEntries.concat(root.commandEntries)
-    var providers = [snippetsBuiltin, quicklinksBuiltin, windowsBuiltin, omarchyMenuBuiltin]
+    var providers = [snippetsBuiltin, quicklinksBuiltin, windowsBuiltin, omarchyMenuBuiltin, scriptsBuiltin]
     for (var p = 0; p < providers.length; p++) {
       if (providers[p] && typeof providers[p].rootEntries === "function") {
         try { all = all.concat(providers[p].rootEntries()) } catch (e) { console.warn("launcher: provider failed", e) }
       }
     }
+    try { all = all.concat(root.extensionEntries()) } catch (e2) { console.warn("launcher: extension entries failed", e2) }
     var overrides = root.settings && root.settings.commands ? root.settings.commands : {}
     for (var i = 0; i < all.length; i++) {
       var e = all[i]
@@ -315,9 +325,20 @@ Item {
     } else if (entry.raw && (entry.raw.exec || entry.raw.action)) {
       secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.raw.exec || (self.pluginDir + "/bin/wm.sh " + entry.raw.action)]); return false } })
     }
+    secondary.push({ id: "configure", title: "Configure Command…", icon: "󰢻", shortcut: { modifiers: ["ctrl", "shift"], key: ",", label: "⌃⇧," },
+      run: function(item, win) { preferencesBuiltin.configure(win, entry); return true } })
     secondary.push({ id: "copy-deeplink", title: "Copy Deeplink", icon: "󰌹", run: function() {
       Quickshell.execDetached(["wl-copy", "--", "omarchy-shell " + self.pluginId + " run " + JSON.stringify(entry.id)]); return false } })
     return { title: entry.title, sections: [{ actions: [primary] }, { actions: secondary }] }
+  }
+
+  function setSetting(key, value) {
+    var s = root.settings && typeof root.settings === "object" ? root.settings : { version: 1 }
+    s[key] = value
+    s.version = 1
+    root.settings = s
+    settingsFile.setText(JSON.stringify(s, null, 2) + "\n")
+    root.rebuildIndex()
   }
 
   function setCommandOverride(entryId, patch) {
@@ -464,6 +485,7 @@ Item {
     if (t - root.lastIconScan > 10 * 60 * 1000 && !iconIndexScan.running) { root.lastIconScan = t; iconIndexScan.running = true }
     if (root.appEntries.length === 0) root.rebuildApps()
     root.evaluateGuards()
+    scriptsBuiltin.onWindowOpened()
   }
 
   Process {
@@ -516,6 +538,165 @@ Item {
   Builtins.Files { id: filesBuiltin; service: root }
   Builtins.ShellCommand { id: shellBuiltin; service: root }
   Builtins.OmarchyMenu { id: omarchyMenuBuiltin; service: root }
+  Builtins.Emoji { id: emojiBuiltin; service: root }
+  Builtins.DevFixtures { id: devFixturesBuiltin; service: root }
+  Builtins.Preferences { id: preferencesBuiltin; service: root }
+  Builtins.Scripts { id: scriptsBuiltin; service: root }
+  Builtins.Notes { id: notesBuiltin; service: root }
+  Builtins.Focus { id: focusBuiltin; service: root }
+  Builtins.Reminders { id: remindersBuiltin; service: root }
+  Builtins.Colors { id: colorsBuiltin; service: root }
+
+  // ------------------------------------------------------------- extensions
+
+  Ext.ExtensionHost { id: extensionHost; service: root }
+  readonly property var extHost: extensionHost
+  property var extensions: []                 // from ~/.local/share/omarchy-launcher/extensions/index.json
+  property var extensionSubtitles: ({})       // "ext/cmd" -> subtitle from updateCommandMetadata
+  readonly property string extensionsIndexPath: home + "/.local/share/omarchy-launcher/extensions/index.json"
+
+  FileView {
+    id: extensionsIndex
+    path: root.extensionsIndexPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: { try { var d = JSON.parse(text()); root.extensions = d && Array.isArray(d.extensions) ? d.extensions : [] } catch (e) { root.extensions = [] } root.rebuildIndex() }
+    onLoadFailed: { root.extensions = []; root.rebuildIndex() }
+    onFileChanged: reload()
+  }
+
+  function extensionEntries() {
+    var out = []
+    for (var i = 0; i < root.extensions.length; i++) {
+      var ext = root.extensions[i]
+      for (var j = 0; j < (ext.commands || []).length; j++) {
+        var cmd = ext.commands[j]
+        var compat = cmd.compat && cmd.compat.status ? cmd.compat.status : "full"
+        var unsupported = compat === "unsupported" || cmd.mode === "menu-bar"
+        var subtitleKey = ext.id + "/" + cmd.name
+        out.push({
+          id: "ext:" + ext.id + "/" + cmd.name,
+          kind: "extension",
+          title: String(cmd.title || cmd.name),
+          subtitle: unsupported ? (cmd.mode === "menu-bar" ? "Menu-bar commands are not supported yet" : "macOS only") : String(root.extensionSubtitles[subtitleKey] || cmd.subtitle || ""),
+          keywords: (cmd.keywords || []).concat([ext.title || "", ext.name || "", cmd.description || ""]),
+          aliases: [], baseAliases: [],
+          icon: cmd.icon ? { kind: "image", value: "file://" + cmd.icon } : (ext.icon ? { kind: "image", value: "file://" + ext.icon } : "󰑣"),
+          accessoryText: String(ext.title || ext.name),
+          enabled: !unsupported && cmd.disabledByDefault !== true,
+          favorite: false,
+          primaryTitle: cmd.mode === "no-view" ? "Run" : "Open",
+          extension: ext,
+          command: cmd,
+          run: function(e, win) {
+            if (root.missingRequiredPrefs(e.extension, e.command).length) { preferencesBuiltin.configureExtension(win, e.extension, e.command, true); return true }
+            extensionHost.launch(e.extension, e.command, win, {})
+            return true
+          }
+        })
+      }
+    }
+    return out
+  }
+
+  function findExtension(extId) {
+    for (var i = 0; i < root.extensions.length; i++) if (root.extensions[i].id === extId || root.extensions[i].name === extId) return root.extensions[i]
+    return null
+  }
+
+  function launchExtensionCommand(extId, commandName, win, args) {
+    var ext = root.findExtension(String(extId))
+    if (!ext) return false
+    var cmd = null
+    for (var j = 0; j < (ext.commands || []).length; j++) if (ext.commands[j].name === commandName) cmd = ext.commands[j]
+    if (!cmd) return false
+    if (!win) return false
+    extensionHost.launch(ext, cmd, win, args || {})
+    return true
+  }
+
+  function setExtensionSubtitle(extId, commandName, subtitle) {
+    var next = ({})
+    for (var k in root.extensionSubtitles) next[k] = root.extensionSubtitles[k]
+    next[extId + "/" + commandName] = subtitle === null || subtitle === undefined ? "" : String(subtitle)
+    root.extensionSubtitles = next
+    root.rebuildIndex()
+  }
+
+  // Merged preference values: manifest defaults, extension-level values,
+  // then command-level values from ~/.config/omarchy-launcher/prefs/<owner>.<name>.json
+  property var extensionPrefs: ({})
+  function extensionPreferences(ext, cmd) {
+    var out = {}
+    var stored = root.extensionPrefs[ext.id] || {}
+    var apply = function(defs, values) {
+      for (var i = 0; i < (defs || []).length; i++) {
+        var d = defs[i]
+        var v = values && values[d.name] !== undefined ? values[d.name] : d["default"]
+        if (d.type === "checkbox") v = v === true || v === "true"
+        if (v !== undefined) out[d.name] = v
+      }
+    }
+    apply(ext.preferences, stored[""])
+    apply(cmd.preferences, stored[cmd.name])
+    return out
+  }
+
+  function missingRequiredPrefs(ext, cmd) {
+    var values = root.extensionPreferences(ext, cmd)
+    var missing = []
+    var check = function(defs) { for (var i = 0; i < (defs || []).length; i++) { var d = defs[i]; if (d.required && (values[d.name] === undefined || values[d.name] === "")) missing.push(d) } }
+    check(ext.preferences)
+    check(cmd ? cmd.preferences : [])
+    return missing
+  }
+
+  function saveExtensionPrefs(extId, data) {
+    var next = ({})
+    for (var k in root.extensionPrefs) next[k] = root.extensionPrefs[k]
+    next[extId] = data
+    root.extensionPrefs = next
+    var file = root.configDir + "/prefs/" + String(extId).replace("/", ".") + ".json"
+    Quickshell.execDetached(["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && printf '%s\n' \"$2\" > \"$1\" && chmod 600 \"$1\"", "--", file, JSON.stringify(data, null, 2)])
+  }
+
+  function loadExtensionPrefs() { prefsLoader.running = true }
+  Process {
+    id: prefsLoader
+    command: ["bash", "-c", "cd " + JSON.stringify(root.configDir + "/prefs") + " 2>/dev/null || exit 0; for f in *.json; do [[ -f $f ]] || continue; printf '===%s===\n' \"${f%.json}\"; cat \"$f\"; printf '\n=== EOM ===\n'; done"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var out = {}
+        var blocks = String(text || "").split("=== EOM ===")
+        for (var i = 0; i < blocks.length; i++) {
+          var m = blocks[i].match(/===(.+?)===\n([\s\S]*)$/)
+          if (!m) continue
+          try { out[m[1].replace(".", "/")] = JSON.parse(m[2]) } catch (e) {}
+        }
+        root.extensionPrefs = out
+      }
+    }
+  }
+
+  function onWindowClosed() { extensionHost.onWindowClosed() }
+
+  // Raycast icon names -> Nerd Font glyphs (data/icons.json).
+  property var raycastIcons: ({})
+  function raycastGlyph(name) {
+    var g = root.raycastIcons[String(name)]
+    return g ? g : "󰘔"
+  }
+  FileView {
+    path: root.pluginDir + "/data/icons.json"
+    printErrors: false
+    onLoaded: { try { root.raycastIcons = JSON.parse(text()) || {} } catch (e) { root.raycastIcons = {} } }
+  }
+
+  // The floating notes window lives in Launcher.qml and registers itself here.
+  property var notesWindow: null
+  function noteSaved(id, text) { notesBuiltin.noteSaved(id, text) }
+  readonly property bool focusActive: focusBuiltin.active
+  readonly property string focusRemaining: focusBuiltin.active ? focusBuiltin.remainingText() : ""
 
   function parseCatalog(raw) {
     try { var d = JSON.parse(raw); return Array.isArray(d) ? d : [] } catch (e) { console.warn("launcher: bad catalog", e); return [] }
@@ -605,7 +786,12 @@ Item {
     function search(text: string): string {
       return root.shell && root.shell.summon(root.pluginId, JSON.stringify({ query: text })) ? "ok" : "unavailable"
     }
-    function reindex(): string { root.rebuildApps(); return "ok" }
+    function reindex(): string { root.rebuildApps(); extensionsIndex.reload(); return "ok" }
+    function oauth(payloadB64: string): string {
+      var params = {}
+      try { params = JSON.parse(Qt.atob(payloadB64 || "")) } catch (e) { return "bad payload" }
+      return extensionHost.oauthCallback(params) ? "ok" : "no pending authorization"
+    }
     function status(): string {
       return JSON.stringify({ entries: root.entries.length, apps: root.appEntries.length, commands: root.commandEntries.length,
         hasShell: !!root.shell, stateDir: root.stateDir })
@@ -614,6 +800,7 @@ Item {
 
   Component.onCompleted: {
     mkdirProc.running = true
+    root.loadExtensionPrefs()
     hiddenScan.running = true
     iconIndexScan.running = true
     root.rebuildApps()

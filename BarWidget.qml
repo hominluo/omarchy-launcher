@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons
 import qs.Ui
 
 // Bar button: a visible way in for anyone who forgot the shortcut. Left
@@ -18,13 +19,18 @@ BarWidget {
   }
   readonly property string hotkey: service && service.settings && service.settings.hotkey ? String(service.settings.hotkey) : "SUPER + D"
   readonly property bool launcherOpen: service ? service.windowOpen === true : false
+  readonly property bool focusActive: service ? service.focusActive === true : false
+  readonly property string focusText: service && service.focusActive ? String(service.focusRemaining) : ""
 
-  implicitWidth: button.implicitWidth
+  implicitWidth: button.implicitWidth + (focusLabel.visible ? focusLabel.implicitWidth + Style.space(4) : 0)
   implicitHeight: button.implicitHeight
 
   WidgetButton {
     id: button
-    anchors.fill: parent
+    anchors.left: parent.left
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    width: implicitWidth
     bar: root.bar
     text: String(root.setting("icon", "󱓞"))
     horizontalMargin: 7.5
@@ -36,5 +42,17 @@ BarWidget {
       if (mouseButton === Qt.RightButton) root.bar.run("omarchy-menu toggle")
       else root.bar.run("omarchy-shell shell toggle " + root.pluginId)
     }
+  }
+
+  Text {
+    id: focusLabel
+    visible: root.focusActive
+    anchors.left: button.right
+    anchors.verticalCenter: parent.verticalCenter
+    text: "󰔛 " + root.focusText
+    color: bar ? bar.barForeground : Color.foreground
+    font.family: bar ? bar.fontFamily : Style.font.family
+    font.pixelSize: Style.font.bodySmall
+    textFormat: Text.PlainText
   }
 }

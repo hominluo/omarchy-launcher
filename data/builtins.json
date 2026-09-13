@@ -1,18 +1,410 @@
 [
-  { "id": "clipboard", "title": "Clipboard History", "subtitle": "", "keywords": ["paste", "copy", "history", "clipboard"], "icon": "󰨸", "handler": "clipboard" },
-  { "id": "snippets", "title": "Search Snippets", "keywords": ["snippet", "text expansion", "paste"], "icon": "󰧭", "handler": "snippets" },
-  { "id": "quicklinks", "title": "Search Quicklinks", "keywords": ["quicklink", "bookmark", "url", "link"], "icon": "󰌹", "handler": "quicklinks" },
-  { "id": "windows", "title": "Switch Windows", "keywords": ["window", "switcher", "focus", "alt tab"], "icon": "󰖯", "handler": "windows", "args": { "mode": "switch" } },
-  { "id": "processes", "title": "Kill Process", "keywords": ["process", "kill", "task", "cpu", "memory", "top"], "icon": "󰯈", "handler": "processes" },
-  { "id": "files", "title": "Search Files", "keywords": ["file", "find", "folder", "directory"], "icon": "󰱽", "handler": "files" },
-  { "id": "shell", "title": "Run Shell Command", "keywords": ["terminal", "bash", "run", "exec", "command"], "icon": "󰆍", "handler": "shell" },
-  { "id": "omarchy-menu", "title": "Omarchy Menu", "subtitle": "Browse the stock Omarchy menu", "keywords": ["omarchy", "menu", "setup", "install", "style"], "icon": "󰍜", "handler": "omarchy-menu" },
-  { "id": "calculator", "title": "Calculator", "subtitle": "Type an expression in the search field", "keywords": ["math", "calc", "convert", "units"], "icon": "󰃬", "handler": "calculator" },
-  { "id": "capture-screenshot", "title": "Take Screenshot", "subtitle": "Select a region", "keywords": ["screenshot", "capture", "grab", "screen"], "icon": "󰹑", "exec": "omarchy-capture-screenshot region", "delayMs": 200 },
-  { "id": "capture-screenshot-window", "title": "Screenshot Window", "keywords": ["screenshot", "capture", "window"], "icon": "󰹑", "exec": "omarchy-capture-screenshot windows", "delayMs": 200 },
-  { "id": "capture-screenshot-full", "title": "Screenshot Full Screen", "keywords": ["screenshot", "capture", "fullscreen"], "icon": "󰹑", "exec": "omarchy-capture-screenshot fullscreen", "delayMs": 200 },
-  { "id": "capture-text", "title": "Capture Text (OCR)", "subtitle": "Copy text from a screen region", "keywords": ["ocr", "text", "recognize", "copy"], "icon": "󰈤", "exec": "omarchy-capture-text", "delayMs": 200 },
-  { "id": "capture-qr", "title": "Scan QR Code", "subtitle": "Decode a QR code on screen", "keywords": ["qr", "code", "scan"], "icon": "󰐳", "exec": "omarchy-capture-qr", "delayMs": 200 },
-  { "id": "capture-record", "title": "Record Screen", "subtitle": "Select a region to record", "keywords": ["record", "video", "screencast", "gif"], "icon": "󰑋", "exec": "omarchy-capture-screenrecording", "delayMs": 200 },
-  { "id": "capture-record-stop", "title": "Stop Recording", "keywords": ["record", "stop"], "icon": "󰑋", "exec": "omarchy-capture-screenrecording --stop-recording", "when": "pgrep -x gpu-screen-recorder" }
+  {
+    "id": "clipboard",
+    "title": "Clipboard History",
+    "subtitle": "",
+    "keywords": [
+      "paste",
+      "copy",
+      "history",
+      "clipboard"
+    ],
+    "icon": "󰨸",
+    "handler": "clipboard"
+  },
+  {
+    "id": "snippets",
+    "title": "Search Snippets",
+    "keywords": [
+      "snippet",
+      "text expansion",
+      "paste"
+    ],
+    "icon": "󰧭",
+    "handler": "snippets"
+  },
+  {
+    "id": "snippets-create",
+    "title": "Create Snippet",
+    "keywords": [
+      "snippet",
+      "new",
+      "add"
+    ],
+    "icon": "󰐕",
+    "handler": "snippets",
+    "args": {
+      "mode": "create"
+    }
+  },
+  {
+    "id": "quicklinks",
+    "title": "Search Quicklinks",
+    "keywords": [
+      "quicklink",
+      "bookmark",
+      "url",
+      "link"
+    ],
+    "icon": "󰌹",
+    "handler": "quicklinks"
+  },
+  {
+    "id": "quicklinks-create",
+    "title": "Create Quicklink",
+    "keywords": [
+      "quicklink",
+      "new",
+      "add",
+      "bookmark"
+    ],
+    "icon": "󰐕",
+    "handler": "quicklinks",
+    "args": {
+      "mode": "create"
+    }
+  },
+  {
+    "id": "windows",
+    "title": "Switch Windows",
+    "keywords": [
+      "window",
+      "switcher",
+      "focus",
+      "alt tab"
+    ],
+    "icon": "󰖯",
+    "handler": "windows",
+    "args": {
+      "mode": "switch"
+    }
+  },
+  {
+    "id": "emoji",
+    "title": "Search Emoji & Symbols",
+    "keywords": [
+      "emoji",
+      "symbols",
+      "unicode",
+      "kaomoji"
+    ],
+    "icon": "󰇲",
+    "handler": "emoji"
+  },
+  {
+    "id": "processes",
+    "title": "Kill Process",
+    "keywords": [
+      "process",
+      "kill",
+      "task",
+      "cpu",
+      "memory",
+      "top"
+    ],
+    "icon": "󰯈",
+    "handler": "processes"
+  },
+  {
+    "id": "files",
+    "title": "Search Files",
+    "keywords": [
+      "file",
+      "find",
+      "folder",
+      "directory"
+    ],
+    "icon": "󰱽",
+    "handler": "files"
+  },
+  {
+    "id": "shell",
+    "title": "Run Shell Command",
+    "keywords": [
+      "terminal",
+      "bash",
+      "run",
+      "exec",
+      "command"
+    ],
+    "icon": "󰆍",
+    "handler": "shell"
+  },
+  {
+    "id": "notes",
+    "title": "Floating Notes",
+    "subtitle": "Toggle the notes window",
+    "keywords": [
+      "note",
+      "notepad",
+      "scratch",
+      "memo"
+    ],
+    "icon": "󰎞",
+    "handler": "notes",
+    "args": {
+      "mode": "toggle"
+    }
+  },
+  {
+    "id": "notes-search",
+    "title": "Search Notes",
+    "keywords": [
+      "note",
+      "notes",
+      "find"
+    ],
+    "icon": "󰎞",
+    "handler": "notes",
+    "args": {
+      "mode": "search"
+    }
+  },
+  {
+    "id": "notes-new",
+    "title": "New Note",
+    "keywords": [
+      "note",
+      "create"
+    ],
+    "icon": "󰐕",
+    "handler": "notes",
+    "args": {
+      "mode": "new"
+    }
+  },
+  {
+    "id": "focus-start",
+    "title": "Start Focus Session",
+    "keywords": [
+      "focus",
+      "pomodoro",
+      "timer",
+      "concentrate"
+    ],
+    "icon": "󰔛",
+    "handler": "focus",
+    "args": {
+      "mode": "start"
+    }
+  },
+  {
+    "id": "focus-stop",
+    "title": "Stop Focus Session",
+    "keywords": [
+      "focus",
+      "pomodoro",
+      "timer"
+    ],
+    "icon": "󰔛",
+    "handler": "focus",
+    "args": {
+      "mode": "stop"
+    }
+  },
+  {
+    "id": "reminder-set",
+    "title": "Set Reminder",
+    "keywords": [
+      "reminder",
+      "remind",
+      "alarm"
+    ],
+    "icon": "󰀠",
+    "handler": "reminders",
+    "args": {
+      "mode": "create"
+    }
+  },
+  {
+    "id": "reminder-list",
+    "title": "Show Reminders",
+    "keywords": [
+      "reminder",
+      "pending",
+      "alarms"
+    ],
+    "icon": "󰀠",
+    "handler": "reminders",
+    "args": {
+      "mode": "list"
+    }
+  },
+  {
+    "id": "color-pick",
+    "title": "Pick Color",
+    "subtitle": "Sample a color from the screen",
+    "keywords": [
+      "color",
+      "colour",
+      "picker",
+      "eyedropper",
+      "hex"
+    ],
+    "icon": "󰈊",
+    "handler": "colors",
+    "args": {
+      "mode": "pick"
+    }
+  },
+  {
+    "id": "color-history",
+    "title": "Color History",
+    "keywords": [
+      "color",
+      "colour",
+      "palette",
+      "swatch"
+    ],
+    "icon": "󰏘",
+    "handler": "colors",
+    "args": {
+      "mode": "history"
+    }
+  },
+  {
+    "id": "omarchy-menu",
+    "title": "Omarchy Menu",
+    "subtitle": "Browse the stock Omarchy menu",
+    "keywords": [
+      "omarchy",
+      "menu",
+      "setup",
+      "install",
+      "style"
+    ],
+    "icon": "󰍜",
+    "handler": "omarchy-menu"
+  },
+  {
+    "id": "calculator",
+    "title": "Calculator",
+    "subtitle": "Type an expression in the search field",
+    "keywords": [
+      "math",
+      "calc",
+      "convert",
+      "units"
+    ],
+    "icon": "󰃬",
+    "handler": "calculator"
+  },
+  {
+    "id": "capture-screenshot",
+    "title": "Take Screenshot",
+    "subtitle": "Select a region",
+    "keywords": [
+      "screenshot",
+      "capture",
+      "grab",
+      "screen"
+    ],
+    "icon": "󰹑",
+    "exec": "omarchy-capture-screenshot region",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-screenshot-window",
+    "title": "Screenshot Window",
+    "keywords": [
+      "screenshot",
+      "capture",
+      "window"
+    ],
+    "icon": "󰹑",
+    "exec": "omarchy-capture-screenshot windows",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-screenshot-full",
+    "title": "Screenshot Full Screen",
+    "keywords": [
+      "screenshot",
+      "capture",
+      "fullscreen"
+    ],
+    "icon": "󰹑",
+    "exec": "omarchy-capture-screenshot fullscreen",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-text",
+    "title": "Capture Text (OCR)",
+    "subtitle": "Copy text from a screen region",
+    "keywords": [
+      "ocr",
+      "text",
+      "recognize",
+      "copy"
+    ],
+    "icon": "󰈤",
+    "exec": "omarchy-capture-text",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-qr",
+    "title": "Scan QR Code",
+    "subtitle": "Decode a QR code on screen",
+    "keywords": [
+      "qr",
+      "code",
+      "scan"
+    ],
+    "icon": "󰐳",
+    "exec": "omarchy-capture-qr",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-record",
+    "title": "Record Screen",
+    "subtitle": "Select a region to record",
+    "keywords": [
+      "record",
+      "video",
+      "screencast",
+      "gif"
+    ],
+    "icon": "󰑋",
+    "exec": "omarchy-capture-screenrecording",
+    "delayMs": 200
+  },
+  {
+    "id": "capture-record-stop",
+    "title": "Stop Recording",
+    "keywords": [
+      "record",
+      "stop"
+    ],
+    "icon": "󰑋",
+    "exec": "omarchy-capture-screenrecording --stop-recording",
+    "when": "pgrep -x gpu-screen-recorder"
+  },
+  {
+    "id": "dev-fixtures",
+    "title": "Dev: Render Fixture",
+    "subtitle": "Render a view-model fixture from tests/fixtures",
+    "keywords": [
+      "developer",
+      "debug",
+      "fixture"
+    ],
+    "icon": "󰨰",
+    "handler": "dev-fixtures"
+  },
+  {
+    "id": "preferences",
+    "title": "Launcher Preferences",
+    "keywords": [
+      "settings",
+      "preferences",
+      "config",
+      "hotkey",
+      "alias"
+    ],
+    "aliases": [
+      "settings"
+    ],
+    "icon": "󰢻",
+    "handler": "preferences"
+  }
 ]

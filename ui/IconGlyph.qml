@@ -19,7 +19,10 @@ Item {
   implicitWidth: size
   implicitHeight: size
 
+  property string tint: ""
+  property string mask: ""
   readonly property bool isImage: kind === "app" || kind === "image"
+  readonly property string glyphText: kind === "raycast-icon" ? (root.iconResolver && typeof root.iconResolver.raycastGlyph === "function" ? root.iconResolver.raycastGlyph(root.value) : "󰘔") : root.value
 
   Image {
     id: image
@@ -42,8 +45,8 @@ Item {
   Text {
     anchors.centerIn: parent
     visible: !root.isImage
-    text: root.value
-    color: root.foreground
+    text: root.glyphText
+    color: root.tint ? root.tint : root.foreground
     font.family: root.kind === "emoji" ? "Noto Color Emoji" : root.fontFamily
     font.pixelSize: root.kind === "emoji" ? root.size * 0.78 : root.size * 0.86
     textFormat: Text.PlainText

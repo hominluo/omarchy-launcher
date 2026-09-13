@@ -1,0 +1,14 @@
+#!/bin/bash
+# `launcher` CLI wrapper: finds a Node.js >= 22 and runs runtime/cli.js.
+dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+node_bin="${OMARCHY_LAUNCHER_NODE:-}"
+if [[ -z $node_bin ]]; then
+  for candidate in "$HOME/.local/share/omarchy-launcher/runtime/node/current/bin/node" /usr/bin/node "$HOME/.local/share/mise/shims/node"; do
+    [[ -x $candidate ]] && { node_bin=$candidate; break; }
+  done
+  if [[ -z $node_bin ]]; then
+    for d in "$HOME"/.local/share/mise/installs/node/*/bin/node; do [[ -x $d ]] && node_bin=$d; done
+  fi
+fi
+[[ -n $node_bin ]] || { echo "launcher: Node.js 22+ is required (omarchy pkg add nodejs npm)" >&2; exit 1; }
+exec "$node_bin" "$dir/runtime/cli.js" "$@"

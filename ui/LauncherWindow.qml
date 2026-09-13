@@ -53,9 +53,18 @@ PanelWindow {
   readonly property var currentFrame: stack.current
   readonly property var currentView: stack.currentView
   readonly property bool atRoot: stack.depth <= 1
+  readonly property string viewType: currentView ? String(currentView.type) : "list"
   readonly property bool splitView: currentView ? currentView.type === "list" && currentView.isShowingDetail === true : false
+  readonly property bool formView: viewType === "form"
+  readonly property bool detailView: viewType === "detail"
+  readonly property bool searchable: viewType === "list" || viewType === "grid"
+  // The pane that owns the cursor for keyboard navigation.
+  readonly property var activePane: viewType === "grid" ? gridPane : listPane
   property bool confirmOpen: false
   property var confirmCallback: null
+  property var confirmDismissCallback: null
+  property var toastPrimaryAction: null
+  property var accessoryValues: ({})     // viewId -> current search-bar dropdown value
 
   // ------------------------------------------------------------- lifecycle
 
@@ -98,14 +107,35 @@ PanelWindow {
       listPane.cursorActive = true
       return
     }
+    if (typeof frame.owner.searchText === "function" && !frame.view.filtering) { frame.owner.searchText(frame.view.id, text); return }
     if (frame.view.filtering) {
       listPane.filterText = text
+      gridPane.filterText = text
       return
     }
     if (typeof frame.owner.searchText === "function") frame.owner.searchText(frame.view.id, text)
   }
 
   function searchTextValue() { return searchBar.text }
+
+  function notifySelection(itemId) {
+    var frame = stack.current
+    if (frame && frame.owner && typeof frame.owner.selection === "function") frame.owner.selection(frame.view.id, itemId)
+  }
+  function notifyLoadMore() {
+    var frame = stack.current
+    if (frame && frame.owner && typeof frame.owner.loadMore === "function" && frame.view.pagination && frame.view.pagination.hasMore) frame.owner.loadMore(frame.view.id)
+  }
+  function cycleAccessory(delta) {
+    var view = stack.currentView
+    var acc = view ? view.searchBarAccessory : null
+    if (!acc) return
+    var values = []
+    for (var i = 0; i < (acc.sections || []).length; i++) for (var j = 0; j < acc.sections[i].items.length; j++) values.push(acc.sections[i].items[j].value)
+    if (!values.length) return
+    var cur = values.indexOf(panel.accessoryValueFor(view))
+    panel.chooseAccessory(values[(cur + delta + values.length) % values.length])
+  }
 
   function setSearchText(text) {
     searchBar.reset(text)
@@ -116,9 +146,18 @@ PanelWindow {
     var view = stack.currentView
     searchBar.reset(view ? view.searchText : "")
     listPane.filterText = view && view.filtering ? searchBar.text : ""
+    gridPane.filterText = listPane.filterText
     listPane.selectedIndex = 0
     listPane.cursorActive = true
-    Qt.callLater(function() { searchBar.focusInput() })
+    gridPane.selectedIndex = 0
+    gridPane.cursorActive = true
+    Qt.callLater(function() { panel.focusCurrent() })
+  }
+
+  function focusCurrent() {
+    if (!panel.opened) return
+    if (panel.formView) { formPane.focusedIndex = -1; formPane.focusField(formPane.firstEditable(), true) }
+    else searchBar.focusInput()
   }
 
   // Pushing a view for a built-in: `owner` gets searchText/invoke callbacks.
@@ -143,8 +182,35 @@ PanelWindow {
 
   // ------------------------------------------------------------- feedback
 
-  function showToast(spec) { toast.show(spec || {}) }
-  function hideToast() { toast.hide() }
+  function showToast(spec) {
+    spec = spec || {}
+    panel.toastPrimaryAction = spec.primaryAction || null
+    toast.show(spec)
+  }
+  function hideToast() { toast.hide(); panel.toastPrimaryAction = null }
+  function onConfirmDismissed(cb) { panel.confirmDismissCallback = cb }
+  function setAccessoryValue(viewId, value) {
+    var next = ({})
+    for (var k in panel.accessoryValues) next[k] = panel.accessoryValues[k]
+    next[viewId] = value
+    panel.accessoryValues = next
+  }
+  function accessoryValueFor(view) {
+    if (!view) return ""
+    if (panel.accessoryValues[view.id] !== undefined) return panel.accessoryValues[view.id]
+    var acc = view.searchBarAccessory
+    if (!acc) return ""
+    if (acc.value !== undefined && acc.value !== null) return String(acc.value)
+    if (acc.defaultValue !== undefined && acc.defaultValue !== null) return String(acc.defaultValue)
+    return ""
+  }
+  function chooseAccessory(value) {
+    var view = stack.currentView
+    if (!view || !view.searchBarAccessory) return
+    panel.setAccessoryValue(view.id, value)
+    var frame = stack.current
+    if (frame && frame.owner && typeof frame.owner.dropdown === "function") frame.owner.dropdown(view.id, view.searchBarAccessory.id, value)
+  }
 
   function confirm(message, confirmText, callback) {
     confirmDialog.message = String(message || "Are you sure?")
@@ -180,8 +246,14 @@ PanelWindow {
     return null
   }
 
+  function selectedItem() {
+    if (panel.formView) return { id: "form", title: "", values: formPane.collect(), actions: null, data: null }
+    if (panel.detailView) return { id: "detail", title: "", actions: null, data: null }
+    return panel.activePane.selectedItem()
+  }
+
   function primaryTitle() {
-    var item = listPane.selectedItem()
+    var item = panel.selectedItem()
     var action = item ? panel.actionAt(item, 0) : null
     return action ? action.title : ""
   }
@@ -194,44 +266,138 @@ PanelWindow {
       if (!keep) panel.dismiss()
       return
     }
+    var owner = frame ? frame.owner : null
+    var viewId = frame ? frame.view.id : ""
+    var payload = action.payload || {}
+    var contentText = function(c) { return c === undefined || c === null ? "" : (typeof c === "object" ? String(c.text !== undefined ? c.text : (c.file || "")) : String(c)) }
+    var after = function(args) {
+      if (action.callbackId && owner && typeof owner.invoke === "function") owner.invoke(viewId, action.callbackId, { itemId: item ? item.id : "", args: args || [] })
+    }
     switch (action.kind) {
+      case "submitForm":
+        if (owner && typeof owner.formSubmit === "function") owner.formSubmit(viewId, action.id, formPane.collect())
+        return
       case "pop": panel.popView(); return
       case "popToRoot": panel.popToRoot(); return
       case "close": panel.dismiss(); return
-      case "copy":
-        if (action.payload && action.payload.text !== undefined) Quickshell.execDetached(["wl-copy", "--", String(action.payload.text)])
-        panel.dismiss()
+      case "copy": {
+        var text = payload.text !== undefined ? String(payload.text) : contentText(payload.content)
+        if (payload.content && typeof payload.content === "object" && payload.content.file && !payload.content.text)
+          Quickshell.execDetached(["bash", "-c", "printf 'file://%s' \"$1\" | wl-copy --type text/uri-list", "--", String(payload.content.file)])
+        else Quickshell.execDetached(["wl-copy", "--", text])
+        panel.showToast({ style: "success", title: "Copied to Clipboard" })
+        after([payload.content !== undefined ? payload.content : text])
         return
-      case "openInBrowser":
-      case "open":
-        if (action.payload && (action.payload.url || action.payload.target)) Qt.openUrlExternally(String(action.payload.url || action.payload.target))
+      }
+      case "paste": {
+        var ptext = contentText(payload.content !== undefined ? payload.content : payload.text)
         panel.dismiss()
+        Quickshell.execDetached(["bash", panel.service.pluginDir + "/bin/paste.sh", ptext])
+        after([payload.content !== undefined ? payload.content : ptext])
+        return
+      }
+      case "openInBrowser":
+      case "open": {
+        var target = String(payload.url || payload.target || "")
+        if (target) {
+          if (payload.app) Quickshell.execDetached(["bash", "-lc", "uwsm-app -- gtk-launch " + JSON.stringify(String(payload.app).replace(/\.desktop$/, "") + ".desktop") + " " + JSON.stringify(target) + " || xdg-open " + JSON.stringify(target)])
+          else Qt.openUrlExternally(target)
+        }
+        panel.dismiss()
+        after([target])
+        return
+      }
+      case "openWith": {
+        var owPath = String(payload.path || "")
+        Quickshell.execDetached(["bash", "-lc", "xdg-open " + JSON.stringify(owPath)])
+        panel.dismiss()
+        after([owPath])
+        return
+      }
+      case "showInFileManager": {
+        var sp = String(payload.path || "")
+        Quickshell.execDetached(["bash", "-lc", "nautilus --select " + JSON.stringify(sp) + " 2>/dev/null || xdg-open " + JSON.stringify(sp.replace(/\/[^/]*$/, ""))])
+        panel.dismiss()
+        after([sp])
+        return
+      }
+      case "trash": {
+        var paths = (payload.paths || []).map(String)
+        panel.confirm("Move " + (paths.length === 1 ? paths[0].split("/").pop() : paths.length + " items") + " to the trash?", "Trash", function() { Quickshell.execDetached(["gio", "trash"].concat(paths)); after([paths]) })
+        return
+      }
+      case "toggleQuickLook": {
+        var ql = item && item.quickLook ? String(item.quickLook.path || "") : ""
+        if (ql) Quickshell.execDetached(["xdg-open", ql])
+        return
+      }
+      case "createSnippet":
+        if (panel.service) panel.service.runCommandId("cmd:snippets-create", panel, { mode: "create", seed: payload.snippet || {} })
+        return
+      case "createQuicklink":
+        if (panel.service) panel.service.runCommandId("cmd:quicklinks-create", panel, { mode: "create", name: payload.quicklink ? payload.quicklink.name : "", link: payload.quicklink ? payload.quicklink.link : "" })
+        return
+      case "pickDate":
+        panel.showToast({ style: "failure", title: "Date picker actions are not supported yet" })
         return
       case "push":
-        if (action.payload && action.payload.view) panel.pushView(action.payload.view, frame ? frame.owner : null)
+        if (payload.view) panel.pushView(payload.view, owner)
         return
       default:
-        if (frame && frame.owner && typeof frame.owner.invoke === "function")
-          frame.owner.invoke(frame.view.id, action.id, { itemId: item ? item.id : "", action: action })
+        if (owner && typeof owner.invoke === "function") owner.invoke(viewId, action.id, { itemId: item ? item.id : "", action: action, args: [] })
     }
   }
 
+  // Per-action keyboard shortcuts (Raycast cmd/ctrl -> Ctrl, opt -> Alt).
+  function matchShortcut(event, item) {
+    var spec = panel.actionsFor(item)
+    if (!spec) return null
+    var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+    var shift = (event.modifiers & Qt.ShiftModifier) !== 0
+    var alt = (event.modifiers & Qt.AltModifier) !== 0
+    var meta = (event.modifiers & Qt.MetaModifier) !== 0
+    if (!ctrl && !alt && !meta) return null
+    var keyText = String(event.text || "").toLowerCase()
+    var keyNames = {}
+    keyNames[Qt.Key_Return] = "return"; keyNames[Qt.Key_Enter] = "enter"; keyNames[Qt.Key_Backspace] = "backspace"; keyNames[Qt.Key_Delete] = "deleteForward"
+    keyNames[Qt.Key_Tab] = "tab"; keyNames[Qt.Key_Up] = "arrowUp"; keyNames[Qt.Key_Down] = "arrowDown"; keyNames[Qt.Key_Left] = "arrowLeft"; keyNames[Qt.Key_Right] = "arrowRight"
+    keyNames[Qt.Key_PageUp] = "pageUp"; keyNames[Qt.Key_PageDown] = "pageDown"; keyNames[Qt.Key_Home] = "home"; keyNames[Qt.Key_End] = "end"; keyNames[Qt.Key_Space] = "space"; keyNames[Qt.Key_Escape] = "escape"
+    var pressed = keyNames[event.key] || (event.key >= Qt.Key_A && event.key <= Qt.Key_Z ? String.fromCharCode(event.key).toLowerCase() : (event.key >= Qt.Key_0 && event.key <= Qt.Key_9 ? String.fromCharCode(event.key) : keyText))
+    for (var i = 0; i < spec.sections.length; i++) {
+      var acts = spec.sections[i].actions
+      for (var j = 0; j < acts.length; j++) {
+        var sc = acts[j].shortcut
+        if (!sc || !sc.key) continue
+        var mods = sc.modifiers || []
+        var wantCtrl = mods.indexOf("ctrl") >= 0 || mods.indexOf("cmd") >= 0
+        var wantAlt = mods.indexOf("alt") >= 0 || mods.indexOf("opt") >= 0
+        var wantShift = mods.indexOf("shift") >= 0
+        var wantMeta = mods.indexOf("super") >= 0 || mods.indexOf("windows") >= 0
+        var key = String(sc.key)
+        var keyOk = key.toLowerCase() === String(pressed).toLowerCase() || (key === "delete" && pressed === "backspace")
+        if (keyOk && wantCtrl === ctrl && wantAlt === alt && wantShift === shift && wantMeta === meta) return acts[j]
+      }
+    }
+    return null
+  }
+
   function activate(level) {
-    var item = listPane.selectedItem()
+    var item = panel.selectedItem()
     if (!item) return
+    if (panel.formView && formPane.hasErrors()) { panel.showToast({ style: "failure", title: "Fix the highlighted fields first" }); return }
     panel.runAction(panel.actionAt(item, level), item)
   }
 
   function toggleActions() {
     if (actionPanel.opened) { actionPanel.close(); return }
-    var item = listPane.selectedItem()
+    var item = panel.selectedItem()
     var spec = panel.actionsFor(item)
     if (!spec || !spec.sections.length) return
     actionPanel.open({ title: spec.title || (item ? item.title : ""), sections: spec.sections })
   }
 
   function autocomplete() {
-    var item = listPane.selectedItem()
+    var item = panel.activePane.selectedItem()
     if (!item || !item.title) return
     if (searchBar.text === item.title) return
     panel.setSearchText(item.title)
@@ -254,25 +420,53 @@ PanelWindow {
     var key = event.key
 
     if (key === Qt.Key_Escape) { panel.escapePressed(); return true }
-    if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N) || (ctrl && key === Qt.Key_J)) { listPane.move(1); return true }
-    if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) { listPane.move(-1); return true }
-    if (key === Qt.Key_PageDown) { listPane.page(1); return true }
-    if (key === Qt.Key_PageUp) { listPane.page(-1); return true }
-    if (key === Qt.Key_Home && ctrl) { listPane.jump(0); return true }
-    if (key === Qt.Key_End && ctrl) { listPane.jump(1e9); return true }
-    if (key === Qt.Key_Return || key === Qt.Key_Enter) { panel.activate(ctrl ? (shift ? 2 : 1) : 0); return true }
     if (ctrl && key === Qt.Key_K) { panel.toggleActions(); return true }
+    if (ctrl && key === Qt.Key_T && panel.toastPrimaryAction && typeof panel.toastPrimaryAction.run === "function") { panel.toastPrimaryAction.run(); return true }
+    if ((ctrl || alt) && !(key === Qt.Key_Return || key === Qt.Key_Enter) && !(ctrl && key === Qt.Key_U) && !(ctrl && (key === Qt.Key_N || key === Qt.Key_P || key === Qt.Key_J))) {
+      var sel = panel.selectedItem()
+      var matched = sel ? panel.matchShortcut(event, sel) : null
+      if (matched) { panel.runAction(matched, sel); return true }
+    }
+    if (panel.formView) {
+      if ((key === Qt.Key_Return || key === Qt.Key_Enter) && ctrl) { panel.activate(shift ? 1 : 0); return true }
+      return false
+    }
+    if (panel.detailView) {
+      if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N)) { fullDetail.scrollBy(1); return true }
+      if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) { fullDetail.scrollBy(-1); return true }
+      if (key === Qt.Key_PageDown) { fullDetail.scrollBy(8); return true }
+      if (key === Qt.Key_PageUp) { fullDetail.scrollBy(-8); return true }
+      if (key === Qt.Key_Return || key === Qt.Key_Enter) { panel.activate(ctrl ? (shift ? 2 : 1) : 0); return true }
+      if (key === Qt.Key_Backspace && !ctrl) { panel.popView(); return true }
+      return false
+    }
+    var pane = panel.activePane
+    if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N) || (ctrl && key === Qt.Key_J)) { pane.move(1); return true }
+    if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) { pane.move(-1); return true }
+    if (panel.viewType === "grid" && key === Qt.Key_Right && searchBar.cursorAtEnd()) { gridPane.moveHorizontal(1); return true }
+    if (panel.viewType === "grid" && key === Qt.Key_Left && searchBar.cursorAtStart()) { gridPane.moveHorizontal(-1); return true }
+    if (key === Qt.Key_PageDown) { pane.page(1); return true }
+    if (key === Qt.Key_PageUp) { pane.page(-1); return true }
+    if (key === Qt.Key_Home && ctrl) { pane.jump(0); return true }
+    if (key === Qt.Key_End && ctrl) { pane.jump(1e9); return true }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) { panel.activate(ctrl ? (shift ? 2 : 1) : 0); return true }
     if (ctrl && key === Qt.Key_U) { panel.setSearchText(""); return true }
+    if (alt && (key === Qt.Key_Down || key === Qt.Key_Up) && stack.currentView && stack.currentView.searchBarAccessory) { panel.cycleAccessory(key === Qt.Key_Down ? 1 : -1); return true }
     if (key === Qt.Key_Backspace && !ctrl && !alt && searchBar.text.length === 0) { if (!panel.atRoot) panel.popView(); return true }
     if (key === Qt.Key_Tab && !ctrl) { panel.autocomplete(); return true }
     if (ctrl && key === Qt.Key_R) { if (panel.atRoot) panel.onSearchEdited(searchBar.text); return true }
+    if (ctrl && key === Qt.Key_Comma && panel.service) {
+      if (shift && panel.atRoot) { var sel = pane.selectedItem(); if (sel && sel.data && sel.data.entryId !== undefined) panel.service.runCommandId("cmd:preferences", panel, { entryId: sel.data.entryId }) }
+      else panel.service.runCommandId("cmd:preferences", panel, {})
+      return true
+    }
     if (ctrl && shift && key === Qt.Key_C) {
-      var item = listPane.selectedItem()
+      var item = pane.selectedItem()
       if (item) { Quickshell.execDetached(["wl-copy", "--", String(item.title)]); panel.showToast({ style: "success", title: "Copied " + item.title }) }
       return true
     }
     if (ctrl && shift && key === Qt.Key_F && panel.atRoot) {
-      var fav = listPane.selectedItem()
+      var fav = pane.selectedItem()
       if (fav && panel.service) panel.service.toggleFavorite(fav.data ? fav.data.entryId : "", panel)
       return true
     }
@@ -312,11 +506,15 @@ PanelWindow {
       anchors.right: parent.right
       anchors.rightMargin: card.contentRightInset
       height: panel.searchHeight
-      placeholder: stack.currentView ? stack.currentView.searchBarPlaceholder : "Search…"
+      placeholder: stack.currentView ? (panel.searchable ? stack.currentView.searchBarPlaceholder : (stack.currentView.navigationTitle || "")) : "Search…"
       foreground: panel.foreground
       fontFamily: panel.fontFamily
       loading: stack.currentView ? stack.currentView.isLoading : false
       leadingGlyph: panel.atRoot ? "" : "‹"
+      editable: panel.searchable
+      accessory: stack.currentView ? stack.currentView.searchBarAccessory : null
+      accessoryValue: panel.accessoryValueFor(stack.currentView)
+      onAccessoryChosen: function(value) { panel.chooseAccessory(value) }
       keyHandler: panel.handleKey
       onTextEdited: function(text) { panel.onSearchEdited(text) }
     }
@@ -345,11 +543,12 @@ PanelWindow {
 
       ListPane {
         id: listPane
+        visible: panel.viewType === "list"
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         width: panel.splitView ? Math.round(parent.width * 0.42) : parent.width
-        view: stack.currentView
+        view: panel.viewType === "list" ? stack.currentView : null
         iconResolver: panel.iconResolver
         foreground: panel.foreground
         background: panel.background
@@ -358,6 +557,50 @@ PanelWindow {
         selectedBorderSpec: panel.selectedBorderSpec
         fontFamily: panel.fontFamily
         onActivateRequested: panel.activate(0)
+        onSelectionChanged: function(itemId) { panel.notifySelection(itemId) }
+        onLoadMoreRequested: panel.notifyLoadMore()
+      }
+
+      GridPane {
+        id: gridPane
+        visible: panel.viewType === "grid"
+        anchors.fill: parent
+        view: panel.viewType === "grid" ? stack.currentView : null
+        iconResolver: panel.iconResolver
+        foreground: panel.foreground
+        background: panel.background
+        selectedBackground: panel.selectedBackground
+        selectedText: panel.selectedText
+        selectedBorderSpec: panel.selectedBorderSpec
+        fontFamily: panel.fontFamily
+        onActivateRequested: panel.activate(0)
+        onSelectionChanged: function(itemId) { panel.notifySelection(itemId) }
+      }
+
+      DetailPane {
+        id: fullDetail
+        visible: panel.detailView
+        anchors.fill: parent
+        foreground: panel.foreground
+        fontFamily: panel.fontFamily
+        markdown: panel.detailView && stack.currentView ? String(stack.currentView.markdown || "") : ""
+        metadata: panel.detailView && stack.currentView && stack.currentView.metadata ? stack.currentView.metadata : []
+      }
+
+      FormPane {
+        id: formPane
+        visible: panel.formView
+        anchors.fill: parent
+        foreground: panel.foreground
+        background: panel.background
+        fontFamily: panel.fontFamily
+        view: panel.formView ? stack.currentView : null
+        keyHandler: panel.handleKey
+        onSubmitRequested: panel.activate(0)
+        onFieldChanged: function(fieldId, value) {
+          var frame = stack.current
+          if (frame && frame.owner && typeof frame.owner.formChange === "function") frame.owner.formChange(frame.view.id, fieldId, value)
+        }
       }
 
       Rectangle {
@@ -385,7 +628,7 @@ PanelWindow {
           var _i = listPane.selectedIndex
           var _c = listPane.count
           var _v = stack.currentView
-          return panel.splitView ? listPane.selectedItem() : null
+          return panel.splitView && panel.viewType === "list" ? listPane.selectedItem() : null
         }
         markdown: selected && selected.detail ? String(selected.detail.markdown || "") : ""
         image: selected && selected.detail && selected.detail.image ? String(selected.detail.image) : ""
@@ -417,11 +660,11 @@ PanelWindow {
       fontFamily: panel.fontFamily
       title: stack.currentView && stack.currentView.navigationTitle ? stack.currentView.navigationTitle : "Launcher"
       leadingVisible: !toast.shown
-      primaryVisible: !listPane.empty
+      primaryVisible: panel.formView || panel.detailView || !panel.activePane.empty
       primaryTitle: {
         var _v = stack.currentView
-        var _i = listPane.selectedIndex
-        var _c = listPane.count
+        var _i = listPane.selectedIndex + gridPane.selectedIndex
+        var _c = listPane.count + gridPane.count
         var _r = panel.service ? panel.service.indexRevision : 0
         return panel.primaryTitle()
       }
@@ -451,8 +694,8 @@ PanelWindow {
       borderSpec: panel.borderSpec
       fontFamily: panel.fontFamily
       cornerRadius: panel.cornerRadius
-      onTriggered: function(action) { panel.runAction(action, listPane.selectedItem()) }
-      onClosed: Qt.callLater(function() { if (panel.opened) searchBar.focusInput() })
+      onTriggered: function(action) { panel.runAction(action, panel.selectedItem()) }
+      onClosed: Qt.callLater(function() { panel.focusCurrent() })
     }
 
     ConfirmDialog {
@@ -467,13 +710,19 @@ PanelWindow {
       selectedText: panel.selectedText
       fontFamily: panel.fontFamily
       cornerRadius: panel.cornerRadius
-      onCanceled: { panel.confirmOpen = false; panel.confirmCallback = null; Qt.callLater(function() { searchBar.focusInput() }) }
+      onCanceled: {
+        panel.confirmOpen = false; panel.confirmCallback = null
+        var dc = panel.confirmDismissCallback; panel.confirmDismissCallback = null
+        if (typeof dc === "function") dc()
+        Qt.callLater(function() { panel.focusCurrent() })
+      }
       onConfirmed: {
         panel.confirmOpen = false
         var cb = panel.confirmCallback
         panel.confirmCallback = null
+        panel.confirmDismissCallback = null
         if (typeof cb === "function") cb()
-        Qt.callLater(function() { if (panel.opened) searchBar.focusInput() })
+        Qt.callLater(function() { panel.focusCurrent() })
       }
     }
   }

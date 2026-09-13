@@ -131,18 +131,82 @@ BuiltinHost {
         data: { link: l },
         actions: { sections: [{ actions: [
           { id: "open", title: hasQuery(l) ? "Search" : "Open", icon: "󰏌", run: function(item, win) { if (self.hasQuery(item.data.link)) { self.openQueryView(win, item.data.link); return true } self.openLink(item.data.link, ""); return false } },
-          { id: "copy", title: "Copy Link", icon: "󰆏", run: function(item) { self.copyText(item.data.link.link); return false } },
-          { id: "edit", title: "Edit quicklinks.json", icon: "󰲶", run: function() { Quickshell.execDetached(["xdg-open", self.linksPath]); return false } }
+          { id: "copy", title: "Copy Link", icon: "󰆏", run: function(item) { self.copyText(item.data.link.link); return false } }
+        ] }, { actions: [
+          { id: "edit", title: "Edit Quicklink", icon: "󰲶", shortcut: { modifiers: ["ctrl"], key: "e", label: "⌃E" }, run: function(item) { self.editing = item.data.link; self.push(self.formView(item.data.link, {})); return true } },
+          { id: "create", title: "Create Quicklink", icon: "󰐕", shortcut: { modifiers: ["ctrl"], key: "n", label: "⌃N" }, run: function() { self.editing = null; self.push(self.formView(null, {})); return true } },
+          { id: "delete", title: "Delete Quicklink", icon: "󰧧", style: "destructive", shortcut: { modifiers: ["ctrl"], key: "d", label: "⌃D" }, run: function(item) { self.deleteLink(item.data.link); return true } },
+          { id: "file", title: "Edit quicklinks.json", icon: "󰈤", run: function() { Quickshell.execDetached(["xdg-open", self.linksPath]); return false } }
         ] }] }
       })
     }
     return { id: "quicklinks", type: "list", navigationTitle: "Quicklinks", searchBarPlaceholder: "Search quicklinks…", filtering: true, items: items,
-      emptyView: { icon: "󰌹", title: "No quicklinks", description: "Add entries to ~/.config/omarchy-launcher/quicklinks.json" } }
+      emptyView: { icon: "󰌹", title: "No quicklinks", description: "Press Enter to create one" },
+      actions: { sections: [{ actions: [ { id: "create", title: "Create Quicklink", icon: "󰐕", run: function() { host.editing = null; host.push(host.formView(null, {})); return true } } ] }] } }
   }
 
   function reload() { file.reload() }
 
-  function open(win, args) { host.panel = win; host.push(buildView()) }
+  function open(win, args) {
+    host.panel = win
+    if (args && args.mode === "create") { host.editing = null; host.push(formView(null, {}, args)); return }
+    host.push(buildView())
+  }
+
+  property var editing: null
+
+  function formView(existing, errors, args) {
+    var e = errors || {}
+    var seed = args || {}
+    return {
+      id: existing ? "quicklink-edit" : "quicklink-create",
+      type: "form",
+      navigationTitle: existing ? "Edit Quicklink" : "Create Quicklink",
+      fields: [
+        { id: "name", field: "text", title: "Name", placeholder: "Search Wikipedia", autoFocus: true, value: existing ? existing.name : (seed.name || undefined), error: e.name || "" },
+        { id: "link", field: "text", title: "Link", placeholder: "https://example.com/search?q={query}", info: "{query} is replaced with what you type; use {query:raw} to skip URL encoding.", value: existing ? existing.link : (seed.link || undefined), error: e.link || "" },
+        { id: "icon", field: "text", title: "Icon", placeholder: "A glyph or emoji (optional)", value: existing ? existing.icon : undefined },
+        { id: "fallback", field: "checkbox", title: "Fallback", label: "Offer as a fallback when a search has no good match", value: existing ? existing.fallback === true : false }
+      ],
+      actions: { actions: [
+        { id: "save", title: existing ? "Save Quicklink" : "Create Quicklink", icon: "󰆓", kind: "submitForm" },
+        { id: "cancel", title: "Cancel", kind: "pop" }
+      ] }
+    }
+  }
+
+  function formSubmit(viewId, actionId, values) {
+    if (viewId !== "quicklink-create" && viewId !== "quicklink-edit") return
+    var errors = {}
+    var link = String(values.link || "").trim()
+    if (!String(values.name || "").trim()) errors.name = "A name is required"
+    if (!link) errors.link = "A link is required"
+    else if (!/^[a-z][a-z0-9+.-]*:/i.test(link) && link.charAt(0) !== "/" && link.charAt(0) !== "~") errors.link = "Use a full URL (https://…) or a path"
+    if (Object.keys(errors).length) { host.render(formView(host.editing ? Object.assign({}, host.editing, values) : null, errors)); return }
+    var list = host.links.slice()
+    var entry = { id: host.editing ? host.editing.id : "link-" + Date.now().toString(36), name: String(values.name).trim(), link: link, icon: String(values.icon || "").trim(), openWith: host.editing ? host.editing.openWith : "", fallback: values.fallback === true }
+    if (host.editing) { for (var i = 0; i < list.length; i++) if (list[i].id === host.editing.id) list[i] = entry }
+    else list.push(entry)
+    saveAll(list)
+    host.toast("success", host.editing ? "Quicklink saved" : "Quicklink created", entry.name)
+    host.editing = null
+    host.pop()
+  }
+
+  function saveAll(list) {
+    host.links = list
+    file.setText(JSON.stringify({ version: 1, items: list }, null, 2) + "\n")
+    if (service) service.rebuildIndex()
+    if (host.activeViewId === "quicklinks") host.render(buildView())
+  }
+
+  function deleteLink(l) {
+    var self = host
+    host.confirm("Delete quicklink “" + l.name + "”?", "Delete", function() {
+      self.saveAll(self.links.filter(function(x) { return x.id !== l.id }))
+      self.toast("success", "Deleted " + l.name)
+    })
+  }
 
   function load(raw) {
     var data = null

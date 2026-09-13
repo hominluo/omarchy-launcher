@@ -1,0 +1,11 @@
+{
+  "id": "fixture-detail", "type": "detail", "navigationTitle": "Fixture: Detail",
+  "markdown": "# Heading\n\nSome **bold** and _italic_ text with a [link](https://omarchy.org) and `inline code`.\n\n- bullet one\n- bullet two\n\n1. first\n2. second\n\n```bash\nomarchy-shell shell toggle io.github.hominluo.launcher\n```\n\n> A quote block.\n\n| Col A | Col B |\n|---|---|\n| 1 | 2 |\n",
+  "metadata": [
+    { "kind": "label", "title": "Status", "text": "Open" },
+    { "kind": "tags", "title": "Labels", "tags": [ { "text": "bug" }, { "text": "p1" } ] },
+    { "kind": "separator" },
+    { "kind": "link", "title": "Repository", "text": "hominluo/omarchy-launcher", "target": "https://github.com/hominluo/omarchy-launcher" }
+  ],
+  "actions": { "actions": [ { "id": "open", "title": "Open in Browser", "kind": "openInBrowser", "payload": { "url": "https://omarchy.org" } }, { "id": "copy", "title": "Copy Link", "kind": "copy", "payload": { "text": "https://omarchy.org" } } ] }
+}

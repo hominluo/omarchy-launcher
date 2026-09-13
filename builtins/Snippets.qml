@@ -74,8 +74,12 @@ BuiltinHost {
         data: { snippet: s },
         actions: { sections: [ { actions: [
           { id: "paste", title: "Paste", icon: "󰆒", run: function(item) { self.pasteSnippet(item.data.snippet); return false } },
-          { id: "copy", title: "Copy to Clipboard", icon: "󰆏", run: function(item) { self.copySnippet(item.data.snippet); return false } },
-          { id: "edit", title: "Edit snippets.json", icon: "󰲶", run: function() { self.openEditor(); return false } }
+          { id: "copy", title: "Copy to Clipboard", icon: "󰆏", run: function(item) { self.copySnippet(item.data.snippet); return false } }
+        ] }, { actions: [
+          { id: "edit", title: "Edit Snippet", icon: "󰲶", shortcut: { modifiers: ["ctrl"], key: "e", label: "⌃E" }, run: function(item) { self.editSnippet(item.data.snippet); return true } },
+          { id: "create", title: "Create Snippet", icon: "󰐕", shortcut: { modifiers: ["ctrl"], key: "n", label: "⌃N" }, run: function() { self.editing = null; self.push(self.formView(null, {})); return true } },
+          { id: "delete", title: "Delete Snippet", icon: "󰧧", style: "destructive", shortcut: { modifiers: ["ctrl"], key: "d", label: "⌃D" }, run: function(item) { self.deleteSnippet(item.data.snippet); return true } },
+          { id: "file", title: "Edit snippets.json", icon: "󰈤", run: function() { self.openEditor(); return false } }
         ] } ] }
       })
     }
@@ -87,8 +91,8 @@ BuiltinHost {
       filtering: true,
       isShowingDetail: true,
       items: items,
-      emptyView: { icon: "󰧭", title: "No snippets yet", description: "Add entries to ~/.config/omarchy-launcher/snippets.json" },
-      actions: { sections: [ { actions: [ { id: "edit", title: "Edit snippets.json", icon: "󰲶", run: function() { host.openEditor(); return false } } ] } ] }
+      emptyView: { icon: "󰧭", title: "No snippets yet", description: "Press Enter to create one" },
+      actions: { sections: [ { actions: [ { id: "create", title: "Create Snippet", icon: "󰐕", run: function() { host.editing = null; host.push(host.formView(null, {})); return true } } ] } ] }
     }
   }
 
@@ -101,7 +105,70 @@ BuiltinHost {
   function open(win, args) {
     host.panel = win
     clipboardProbe.running = true
+    if (args && args.mode === "create") { host.push(formView(null, {})); return }
     host.push(buildView())
+  }
+
+  // ---- create / edit
+
+  function formView(existing, errors) {
+    var e = errors || {}
+    return {
+      id: existing ? "snippet-edit" : "snippet-create",
+      type: "form",
+      navigationTitle: existing ? "Edit Snippet" : "Create Snippet",
+      fields: [
+        { id: "name", field: "text", title: "Name", placeholder: "Signature", autoFocus: true, value: existing ? existing.name : undefined, error: e.name || "" },
+        { id: "keyword", field: "text", title: "Keyword", placeholder: "sig", info: "Optional. Type it in root search to paste the snippet.", value: existing ? existing.keyword : undefined, error: e.keyword || "" },
+        { id: "text", field: "textarea", title: "Snippet", placeholder: "Best,\n{cursor}", info: "Placeholders: {clipboard} {date} {time} {datetime} {day} {uuid} {cursor} {argument name=\"x\"}", value: existing ? existing.text : undefined, error: e.text || "" }
+      ],
+      actions: { actions: [
+        { id: "save", title: existing ? "Save Snippet" : "Create Snippet", icon: "󰆓", kind: "submitForm" },
+        { id: "cancel", title: "Cancel", kind: "pop" }
+      ] }
+    }
+  }
+
+  property var editing: null
+
+  function formSubmit(viewId, actionId, values) {
+    if (viewId !== "snippet-create" && viewId !== "snippet-edit") return
+    var errors = {}
+    if (!String(values.name || "").trim()) errors.name = "A name is required"
+    if (!String(values.text || "").trim()) errors.text = "The snippet cannot be empty"
+    var kw = String(values.keyword || "").trim()
+    for (var i = 0; i < host.snippets.length; i++) {
+      var s = host.snippets[i]
+      if (kw && s.keyword === kw && (!host.editing || s.id !== host.editing.id)) errors.keyword = "Keyword already used by “" + s.name + "”"
+    }
+    if (Object.keys(errors).length) { host.render(formView(host.editing ? Object.assign({}, host.editing, values) : null, errors)); return }
+    var list = host.snippets.slice()
+    if (host.editing) {
+      for (var j = 0; j < list.length; j++) if (list[j].id === host.editing.id) list[j] = { id: list[j].id, name: String(values.name).trim(), keyword: kw, text: String(values.text) }
+    } else {
+      list.push({ id: "snippet-" + Date.now().toString(36), name: String(values.name).trim(), keyword: kw, text: String(values.text) })
+    }
+    saveAll(list)
+    host.toast("success", host.editing ? "Snippet saved" : "Snippet created", String(values.name).trim())
+    host.editing = null
+    host.pop()
+  }
+
+  function saveAll(list) {
+    host.snippets = list
+    file.setText(JSON.stringify({ version: 1, items: list }, null, 2) + "\n")
+    if (service) service.rebuildIndex()
+    if (host.activeViewId === "snippets") host.render(buildView())
+  }
+
+  function editSnippet(s) { host.editing = s; host.push(formView(s, {})) }
+
+  function deleteSnippet(s) {
+    var self = host
+    host.confirm("Delete snippet “" + s.name + "”?", "Delete", function() {
+      self.saveAll(self.snippets.filter(function(x) { return x.id !== s.id }))
+      self.toast("success", "Deleted " + s.name)
+    })
   }
 
   function load(raw) {

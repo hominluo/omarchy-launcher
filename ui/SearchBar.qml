@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Ui as Kit
 
 // The top search field. A real text input (not a hand-rolled key
 // accumulator) so cursor movement, selection, and IME composition all work.
@@ -17,8 +18,20 @@ Item {
   // function(event) -> bool; return true to swallow the key.
   property var keyHandler: null
   property string leadingGlyph: ""
+  property bool editable: true
 
+  property var accessory: null
+  property string accessoryValue: ""
   signal textEdited(string text)
+  signal accessoryChosen(string value)
+
+  function accessoryOptions() {
+    var out = []
+    if (!bar.accessory) return out
+    var secs = bar.accessory.sections || []
+    for (var i = 0; i < secs.length; i++) for (var j = 0; j < (secs[i].items || []).length; j++) out.push({ value: String(secs[i].items[j].value), label: String(secs[i].items[j].title || secs[i].items[j].value) })
+    return out
+  }
 
   function focusInput() { field.forceActiveFocus() }
   function reset(text) {
@@ -26,6 +39,8 @@ Item {
     field.cursorPosition = field.text.length
   }
   function selectAll() { field.selectAll() }
+  function cursorAtEnd() { return field.cursorPosition >= field.text.length }
+  function cursorAtStart() { return field.cursorPosition <= 0 }
 
   Text {
     id: leading
@@ -45,7 +60,7 @@ Item {
     id: field
     anchors.left: leading.visible ? leading.right : parent.left
     anchors.leftMargin: leading.visible ? Style.space(10) : Style.space(18)
-    anchors.right: parent.right
+    anchors.right: accessoryDropdown.visible ? accessoryDropdown.left : parent.right
     anchors.rightMargin: Style.space(18)
     anchors.verticalCenter: parent.verticalCenter
     placeholderText: bar.placeholder
@@ -61,11 +76,28 @@ Item {
     topPadding: 0
     bottomPadding: 0
     selectByMouse: true
+    readOnly: !bar.editable
+    opacity: bar.editable ? 1 : 0.85
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: function(event) {
       if (bar.keyHandler && bar.keyHandler(event)) event.accepted = true
     }
     onTextEdited: bar.textEdited(text)
+  }
+
+  Kit.Dropdown {
+    id: accessoryDropdown
+    visible: !!bar.accessory
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(14)
+    anchors.verticalCenter: parent.verticalCenter
+    width: Math.min(Style.space(200), bar.width * 0.35)
+    showLabel: false
+    foreground: bar.foreground
+    fontFamily: bar.fontFamily
+    options: bar.accessoryOptions()
+    value: bar.accessoryValue
+    onChanged: function(v) { bar.accessoryChosen(v) }
   }
 
   // Thin activity line under the field while an owner is loading.
