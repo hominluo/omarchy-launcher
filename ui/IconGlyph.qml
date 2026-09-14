@@ -56,15 +56,36 @@ Item {
     border.color: Util.alpha(root.foreground, 0.25)
   }
 
+  // Glyphs are centred on their ink, not their advance box: Nerd Font
+  // symbols carry uneven side bearings (and some are double-width), which
+  // otherwise leaves every row's icon a few pixels off the others.
+  // Emoji come from a colour font with sane metrics and show up by the
+  // thousand in the picker grid, so they keep the cheap centred path.
+  readonly property bool isGlyph: !isImage && !isSwatch
+  readonly property bool measureInk: isGlyph && kind !== "emoji"
+  TextMetrics {
+    id: inkMetrics
+    font: glyph.font
+    text: root.measureInk ? root.glyphText : ""
+  }
+  FontMetrics {
+    id: fontMetrics
+    font: glyph.font
+  }
+
   Text {
-    anchors.centerIn: parent
-    visible: !root.isImage && !root.isSwatch
+    id: glyph
+    visible: root.isGlyph
     text: root.glyphText
     color: root.tint ? root.tint : root.foreground
     font.family: root.kind === "emoji" ? "Noto Color Emoji" : root.fontFamily
-    font.pixelSize: root.kind === "emoji" ? root.size * 0.78 : root.size * 0.86
+    font.pixelSize: root.kind === "emoji" ? root.size * 0.78 : root.size * 0.9
     textFormat: Text.PlainText
-    horizontalAlignment: Text.AlignHCenter
-    verticalAlignment: Text.AlignVCenter
+    // tightBoundingRect is relative to the pen origin on the baseline; the
+    // Text item's baseline sits `ascent` below its top.
+    readonly property rect ink: inkMetrics.tightBoundingRect
+    readonly property bool inkValid: ink.width > 0 && ink.height > 0
+    x: inkValid ? Math.round((root.width - ink.width) / 2 - ink.x) : Math.round((root.width - width) / 2)
+    y: inkValid ? Math.round((root.height - ink.height) / 2 - (fontMetrics.ascent + ink.y)) : Math.round((root.height - height) / 2)
   }
 }

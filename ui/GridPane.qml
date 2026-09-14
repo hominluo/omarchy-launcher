@@ -198,16 +198,26 @@ Item {
           textFormat: Text.PlainText
         }
 
+        // Only the rows near the viewport get delegates (an emoji picker has
+        // ~1900 cells; instantiating them all took a second per open).
+        readonly property real gridTop: y + (sec.title ? pane.headerHeight : Style.space(4))
+        readonly property int rowCount: Math.ceil(sec.count / pane.columns)
+        readonly property int firstRow: Math.max(0, Math.min(rowCount, Math.floor((flick.contentY - gridTop) / pane.cellHeight) - 1))
+        readonly property int lastRow: Math.max(firstRow, Math.min(rowCount, Math.ceil((flick.contentY + flick.height - gridTop) / pane.cellHeight) + 1))
+        readonly property int firstCell: firstRow * pane.columns
+        readonly property int windowCount: Math.max(0, Math.min(sec.count - firstCell, (lastRow - firstRow) * pane.columns))
+
         Repeater {
-          model: sec.count
+          model: parent.windowCount
           delegate: Item {
             id: cell
             required property int index
-            readonly property int globalIndex: sec.start + index
+            readonly property int localIndex: parent.firstCell + index
+            readonly property int globalIndex: sec.start + localIndex
             readonly property var info: pane.cells[globalIndex] || ({})
             readonly property bool hasCursor: pane.cursorActive && globalIndex === pane.selectedIndex
-            x: pane.horizontalInset + (index % pane.columns) * pane.cellWidth
-            y: (sec.title ? pane.headerHeight : Style.space(4)) + Math.floor(index / pane.columns) * pane.cellHeight
+            x: pane.horizontalInset + (localIndex % pane.columns) * pane.cellWidth
+            y: (sec.title ? pane.headerHeight : Style.space(4)) + Math.floor(localIndex / pane.columns) * pane.cellHeight
             width: pane.cellWidth
             height: pane.cellHeight
 
