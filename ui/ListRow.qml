@@ -2,7 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// One result row: icon, title, dimmed subtitle, right-aligned accessory.
+// One result row: icon, title, dimmed subtitle, and a right-aligned cluster
+//   [alias pill] [hotkey cap, cursor row only] [✓] [type label] [›]
 // Colors follow the single-cursor contract: visuals derive from hasCursor,
 // never from containsMouse.
 BorderSurface {
@@ -17,6 +18,10 @@ BorderSurface {
   required property string accessoryText
   required property string accessoryIcon
   required property string accessoryColor
+  required property string tagText
+  required property string tagColor
+  required property string hotkeyText
+  required property string chevron
 
   property bool hasCursor: false
   property var iconResolver: null
@@ -56,8 +61,8 @@ BorderSurface {
     id: labels
     anchors.left: icon.visible ? icon.right : parent.left
     anchors.leftMargin: icon.visible ? Style.space(10) : row.horizontalInset + Style.space(6)
-    anchors.right: trailing.left
-    anchors.rightMargin: Style.space(10)
+    anchors.right: cluster.left
+    anchors.rightMargin: cluster.width > 0 ? Style.space(10) : 0
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(8)
 
@@ -87,36 +92,83 @@ BorderSurface {
     }
   }
 
-  IconGlyph {
-    id: trailingIcon
-    anchors.right: trailing.visible ? trailing.left : parent.right
-    anchors.rightMargin: trailing.visible ? Style.space(5) : row.horizontalInset + Style.space(6)
-    anchors.verticalCenter: parent.verticalCenter
-    visible: row.accessoryIcon.length > 0
-    kind: row.accessoryIcon.length ? row.accessoryIcon.split("|")[0] : ""
-    value: row.accessoryIcon.length ? row.accessoryIcon.slice(row.accessoryIcon.indexOf("|") + 1) : ""
-    iconResolver: row.iconResolver
-    foreground: row.accessoryColor ? row.accessoryColor : row.foreground
-    fontFamily: row.fontFamily
-    size: Style.space(15)
-    opacity: row.accessoryColor ? 1 : 0.55
-  }
-
-  Text {
-    id: trailing
+  // Right cluster. Each piece hides when empty so the Row packs tightly;
+  // the type label is the only elastic part (capped at 30% of the row).
+  Row {
+    id: cluster
     anchors.right: parent.right
     anchors.rightMargin: row.horizontalInset + Style.space(6)
     anchors.verticalCenter: parent.verticalCenter
-    text: row.accessoryText
-    visible: text.length > 0
-    color: row.accessoryColor ? row.accessoryColor : row.foreground
-    opacity: row.accessoryColor ? 0.95 : 0.5
-    font.family: row.fontFamily
-    font.pixelSize: Style.font.bodySmall
-    textFormat: Text.PlainText
-    width: visible ? Math.min(contentWidth, row.width * 0.3) : 0
-    clip: true
-    horizontalAlignment: Text.AlignRight
+    spacing: Style.space(6)
+
+    Rectangle {
+      id: tagPill
+      visible: row.tagText.length > 0
+      width: visible ? tagLabel.implicitWidth + Style.space(10) : 0
+      height: Style.space(18)
+      radius: Math.min(Style.cornerRadius, Style.space(5))
+      color: row.tagColor ? Util.alpha(row.tagColor, 0.22) : Util.alpha(row.textColor, 0.12)
+      anchors.verticalCenter: parent.verticalCenter
+      Text {
+        id: tagLabel
+        anchors.centerIn: parent
+        text: row.tagText
+        color: row.tagColor ? row.tagColor : row.textColor
+        opacity: row.tagColor ? 1 : 0.85
+        font.family: row.fontFamily
+        font.pixelSize: Style.font.caption
+        textFormat: Text.PlainText
+      }
+    }
+
+    KeyCap {
+      visible: row.hasCursor && row.hotkeyText.length > 0
+      text: row.hotkeyText.replace(/\s*\+\s*/g, "+")
+      foreground: row.textColor
+      fontFamily: row.fontFamily
+      anchors.verticalCenter: parent.verticalCenter
+    }
+
+    IconGlyph {
+      id: trailingIcon
+      anchors.verticalCenter: parent.verticalCenter
+      visible: row.accessoryIcon.length > 0
+      kind: row.accessoryIcon.length ? row.accessoryIcon.split("|")[0] : ""
+      value: row.accessoryIcon.length ? row.accessoryIcon.slice(row.accessoryIcon.indexOf("|") + 1) : ""
+      iconResolver: row.iconResolver
+      foreground: row.accessoryColor ? row.accessoryColor : row.textColor
+      fontFamily: row.fontFamily
+      size: Style.space(15)
+      opacity: row.accessoryColor ? 1 : 0.7
+    }
+
+    Text {
+      id: trailing
+      anchors.verticalCenter: parent.verticalCenter
+      text: row.accessoryText
+      visible: text.length > 0
+      color: row.accessoryColor ? row.accessoryColor : row.textColor
+      opacity: row.accessoryColor ? 0.95 : 0.5
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      textFormat: Text.PlainText
+      // implicitWidth is the natural (unwrapped, unelided) width, so it does
+      // not depend on `width` and cannot loop.
+      width: visible ? Math.min(implicitWidth, row.width * 0.3) : 0
+      clip: true
+      horizontalAlignment: Text.AlignRight
+    }
+
+    Text {
+      visible: row.chevron === "1"
+      text: "›"
+      color: row.textColor
+      opacity: 0.55
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.title
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+    }
   }
 
   MouseArea {

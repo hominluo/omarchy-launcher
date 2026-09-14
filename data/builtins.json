@@ -271,7 +271,9 @@
       "menu",
       "setup",
       "install",
-      "style"
+      "style",
+      "go",
+      "summon"
     ],
     "icon": "󰍜",
     "handler": "omarchy-menu"
@@ -406,5 +408,35 @@
     ],
     "icon": "󰢻",
     "handler": "preferences"
+  },
+  {
+    "id": "fallback-commands",
+    "title": "Fallback Commands",
+    "subtitle": "What a query is handed to when nothing matches",
+    "icon": "󰑖",
+    "keywords": [
+      "fallback",
+      "search with",
+      "preferences",
+      "settings"
+    ],
+    "handler": "fallbacks",
+    "primaryTitle": "Open"
+  },
+  {
+    "id": "favorites",
+    "title": "Favorites",
+    "subtitle": "Reorder or remove pinned commands",
+    "icon": "󰓎",
+    "keywords": [
+      "favorites",
+      "pinned",
+      "preferences"
+    ],
+    "handler": "preferences",
+    "args": {
+      "page": "favorites"
+    },
+    "primaryTitle": "Open"
   }
 ]

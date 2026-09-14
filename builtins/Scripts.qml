@@ -81,7 +81,9 @@ BuiltinHost {
         favorite: false,
         primaryTitle: "Run Script",
         script: sc,
-        run: function(e, win) { return host.runScript(e.script, win, {}) }
+        acceptsArgument: h.arguments.length > 0,
+        run: function(e, win) { return host.runScript(e.script, win, {}) },
+        runWithArgument: h.arguments.length > 0 ? function(e, win, text) { return host.runScript(e.script, win, { arg1: String(text || "") }) } : undefined
       })
     }
     return out

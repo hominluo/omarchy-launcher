@@ -56,10 +56,12 @@ BuiltinHost {
         favorite: false,
         primaryTitle: hasQuery(l) ? "Search" : "Open",
         link: l,
+        acceptsArgument: hasQuery(l),
         run: function(e, win) {
           if (hasQuery(e.link)) { host.openQueryView(win, e.link); return true }
           host.openLink(e.link, "")
-        }
+        },
+        runWithArgument: hasQuery(l) ? function(e, win, text) { host.openLink(e.link, String(text || "")); return false } : undefined
       })
     }
     return out

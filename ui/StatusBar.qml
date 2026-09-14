@@ -8,6 +8,7 @@ Item {
   property string glyph: "󱓞"
   property string title: "Launcher"
   property string primaryTitle: "Open"
+  property string hint: ""
   property bool primaryVisible: true
   property bool leadingVisible: true
   property bool actionsVisible: true
@@ -50,6 +51,19 @@ Item {
     anchors.rightMargin: Style.space(12)
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(6)
+
+    // Contextual hint ("⌃⇧↑↓ reorder" while the cursor is in Favorites).
+    Text {
+      visible: bar.hint.length > 0
+      text: bar.hint
+      color: bar.foreground
+      opacity: 0.45
+      font.family: bar.fontFamily
+      font.pixelSize: Style.font.caption
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+      rightPadding: Style.space(8)
+    }
 
     Item {
       visible: bar.primaryVisible

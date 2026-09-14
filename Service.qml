@@ -1,12 +1,16 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import "lib/Score.js" as Score
 import "lib/Frecency.js" as Frecency
 import "lib/ViewModel.js" as VM
 import "lib/Apps.js" as Apps
 import "lib/Calc.js" as Calc
 import "lib/Units.js" as Units
+import "lib/RootPage.js" as RootPage
+import "lib/OmarchyMenu.js" as Menu
+import "lib/Inline.js" as Inline
 import "builtins" as Builtins
 import "ext" as Ext
 
@@ -52,8 +56,10 @@ Item {
 
   property var frecencyData: Frecency.empty()
   property bool frecencyDirty: false
-  property var settings: ({ version: 1, commands: {} })
-  property var guardResults: ({})          // command id -> { when, checked }
+  property var settings: ({ version: 1, commands: {}, favoritesOrder: [] })
+  property var guardResults: ({})          // entry id -> { when, checked }
+  property string lastCalcResult: ""       // `ans` for the inline calculator
+  property var searchHistoryList: []       // newest first
 
   // Mirrors the window state for the bar button.
   property bool windowOpen: false
@@ -84,6 +90,7 @@ Item {
     "reminders": remindersBuiltin,
     "colors": colorsBuiltin,
     "ai": aiBuiltin,
+    "fallbacks": fallbacksBuiltin,
     "calculator": null
   })
 
@@ -128,7 +135,15 @@ Item {
       return true
     }
     exec()
+    // Toggles stay open and re-read their state so the ✓ follows.
+    if (raw.keepOpen === true && raw.checked) recheckTimer.restart()
     return raw.keepOpen === true
+  }
+
+  Timer {
+    id: recheckTimer
+    interval: 700
+    onTriggered: root.evaluateGuards()
   }
 
   function rebuildCommands() {
@@ -150,16 +165,22 @@ Item {
     }
     try { all = all.concat(root.extensionEntries()) } catch (e2) { console.warn("launcher: extension entries failed", e2) }
     var overrides = root.settings && root.settings.commands ? root.settings.commands : {}
+    var favs = root.favoritesOrder()
+    var favSet = {}
+    for (var f = 0; f < favs.length; f++) favSet[favs[f]] = true
     for (var i = 0; i < all.length; i++) {
       var e = all[i]
       e.enabled = true
-      e.favorite = false
+      e.favorite = !!favSet[e.id]
+      e.hotkey = ""
       e.aliases = (e.baseAliases || []).slice()
+      if (e.accessoryIcon === undefined) e.accessoryIcon = ""
+      if (e.dedupeKey === undefined) e.dedupeKey = e.raw && e.raw.exec ? String(e.raw.exec) : ""
       var o = overrides[e.id]
       if (o) {
         if (o.enabled === false) e.enabled = false
         if (o.alias) e.aliases = [String(o.alias)].concat(e.aliases)
-        if (o.favorite === true) e.favorite = true
+        if (o.favorite === true && !Array.isArray(root.settings.favoritesOrder)) e.favorite = true
         if (o.hotkey) e.hotkey = String(o.hotkey)
       }
       Score.prepare(e)
@@ -181,24 +202,60 @@ Item {
     return g === undefined ? true : g.when !== false
   }
 
+  function isChecked(entry) {
+    var raw = entry ? entry.raw : null
+    if (!raw || !raw.checked) return false
+    var g = root.guardResults[entry.id]
+    return !!(g && g.checked)
+  }
+
   // Ranked [{ entry, score }] for a query.
   function search(query, limit) {
     var scores = Frecency.scores(root.frecencyData, root.now())
     var q = String(query || "").trim()
     var pool = root.entries
+    // Categories stay in the pool at every length (cheap, and their aliases
+    // are what "settings"/"power-menu" should hit); leaves and windows need
+    // two characters so single letters stay about apps and commands.
     if (q.length < 2) pool = pool.filter(function(e) { return e.kind !== "window" && e.kind !== "omarchy-menu" })
     pool = pool.filter(guardOk)
-    return Score.rank(pool, q, scores, limit || 50)
+    return Score.rank(pool, q, scores, limit === undefined || limit === null ? 50 : limit)
   }
 
-  function suggestions(limit) {
-    var ids = Frecency.top(root.frecencyData, root.now(), (limit || 8) * 2)
+  // Frecency-ordered entries, minus windows, categories and excludeIds.
+  function suggestions(limit, excludeIds) {
+    var cap = limit || 8
+    var skip = {}
+    for (var x = 0; x < (excludeIds || []).length; x++) skip[excludeIds[x]] = true
+    var ids = Frecency.top(root.frecencyData, root.now(), cap * 3)
     var out = []
-    for (var i = 0; i < ids.length && out.length < (limit || 8); i++) {
+    for (var i = 0; i < ids.length && out.length < cap; i++) {
       var e = root.entryById(ids[i])
-      if (e && e.enabled !== false && e.kind !== "window" && guardOk(e)) out.push(e)
+      if (e && e.enabled !== false && e.kind !== "window" && e.kind !== "omarchy-category" && !skip[e.id] && guardOk(e)) out.push(e)
     }
     return out
+  }
+
+  // ------------------------------------------------------------- favorites
+
+  function favoritesOrder() {
+    var l = root.settings && Array.isArray(root.settings.favoritesOrder) ? root.settings.favoritesOrder : []
+    return l.map(String)
+  }
+
+  function setFavoritesOrder(list) {
+    root.setSetting("favoritesOrder", list)
+  }
+
+  function moveFavorite(entryId, delta) {
+    var l = root.favoritesOrder()
+    var i = l.indexOf(String(entryId))
+    if (i < 0) return false
+    var j = i + (delta < 0 ? -1 : 1)
+    if (j < 0 || j >= l.length) return false
+    var tmp = l[i]; l[i] = l[j]; l[j] = tmp
+    root.setFavoritesOrder(l)
+    return true
   }
 
   function recordUse(id) {
@@ -209,24 +266,109 @@ Item {
 
   // ------------------------------------------------------------- root view
 
-  function entryRow(e) {
-    var checked = e.raw && e.raw.checked && root.guardResults[e.id] && root.guardResults[e.id].checked
+  // Row anatomy: [icon] title subtitle … [alias pill] [hotkey] [✓] [type label] [›]
+  function entryRow(e, opts) {
+    var acc = []
+    var userAlias = e.aliases && e.aliases.length && e.aliases[0] !== (e.baseAliases || [])[0] ? e.aliases[0] : ""
+    if (userAlias) acc.push({ tag: userAlias })
+    if (e.hotkey) acc.push({ hotkey: e.hotkey })
+    if (root.isChecked(e)) acc.push({ icon: "✓" })
+    if (e.accessoryText && !(opts && opts.compact)) acc.push({ text: e.accessoryText })
+    if (e.accessoryIcon === "›") acc.push({ icon: "›" })
     return {
       id: e.id,
-      title: e.title + (checked ? "  ✓" : ""),
+      title: e.title,
       subtitle: e.subtitle,
       icon: e.icon,
       keywords: e.keywords,
-      accessories: [{ text: (e.favorite ? "󰓎 " : "") + (e.aliases.length && e.aliases[0] !== (e.baseAliases || [])[0] ? e.aliases[0] + "  " : "") + (e.accessoryText || "") }],
+      accessories: acc,
       data: { entryId: e.id }
     }
   }
 
+  // "alias text": an entry that takes a text argument, invoked with the
+  // rest of the query (quicklinks with {query}, scripts and extension
+  // commands with arguments).
+  function argumentRow(q) {
+    var sp = q.indexOf(" ")
+    if (sp <= 0) return null
+    var head = q.slice(0, sp).toLowerCase()
+    var rest = q.slice(sp + 1).trim()
+    if (!rest) return null
+    var self = root
+    for (var i = 0; i < root.entries.length; i++) {
+      var e = root.entries[i]
+      if (e.enabled === false || typeof e.runWithArgument !== "function") continue
+      var match = false
+      for (var a = 0; a < (e._aliases || []).length; a++) if (e._aliases[a] === head) match = true
+      if (!match && e._name === head) match = true
+      if (!match) continue
+      return {
+        id: "arg:" + e.id,
+        title: e.title,
+        subtitle: "with “" + rest + "”",
+        icon: e.icon,
+        accessories: [{ text: e.accessoryText || "" }],
+        data: { entryId: e.id, argument: rest },
+        actions: { sections: [{ actions: [
+          { id: "run", title: e.primaryTitle || "Run", icon: "󰐊", run: function(item, win) { var en = self.entryById(item.data.entryId); if (!en) return false; self.recordUse(en.id); return en.runWithArgument(en, win, item.data.argument) === true } }
+        ] }] }
+      }
+    }
+    return null
+  }
+
+  // Rows for what the text *is*: a URL or a colour.
+  function inlineRows(q) {
+    var out = []
+    var self = root
+    var url = Inline.detectUrl(q)
+    if (url) {
+      out.push({
+        id: "inline:url",
+        title: "Open " + Inline.hostOf(url),
+        subtitle: url,
+        icon: "󰖟",
+        accessories: [{ text: "URL" }],
+        data: { url: url },
+        actions: { sections: [{ actions: [
+          { id: "open", title: "Open in Browser", icon: "󰖟", run: function(item) { Qt.openUrlExternally(item.data.url); return false } },
+          { id: "copy", title: "Copy URL", icon: "󰆏", run: function(item) { Quickshell.execDetached(["wl-copy", "--", item.data.url]); return false } },
+          { id: "quicklink", title: "Create Quicklink…", icon: "󰌹", run: function(item, win) { self.runCommandId("cmd:quicklinks-create", win, { mode: "create", name: Inline.hostOf(item.data.url), link: item.data.url }); return true } }
+        ] }] }
+      })
+    }
+    var color = Inline.parseColor(q)
+    if (color) {
+      var copyAction = function(id, label, text) {
+        return { id: id, title: "Copy " + label, icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", text]); return false } }
+      }
+      out.push({
+        id: "inline:color",
+        title: color.formats.hex,
+        subtitle: color.formats.rgb + "  ·  " + color.formats.hsl,
+        icon: { kind: "swatch", value: color.hex },
+        accessories: [{ text: "Color" }],
+        data: { color: color },
+        actions: { sections: [{ actions: [
+          copyAction("hex", "HEX", color.formats.hex),
+          copyAction("rgb", "RGB", color.formats.rgb),
+          copyAction("hsl", "HSL", color.formats.hsl),
+          copyAction("qml", "QML", color.formats.qml),
+          { id: "paste-hex", title: "Paste HEX", icon: "󰆒", run: function(item, win) { win.dismiss(); Quickshell.execDetached(["bash", self.pluginDir + "/bin/paste.sh", item.data.color.formats.hex]); return false } }
+        ] }] }
+      })
+    }
+    return out
+  }
+
   function calculatorRow(q) {
     var opts = { angle: root.settings && root.settings.calculator ? root.settings.calculator.angle : "deg" }
-    var r = Calc.evaluate(q, opts)
+    var expr = q
+    if (root.lastCalcResult && /\bans\b/i.test(expr)) expr = expr.replace(/\bans\b/gi, "(" + root.lastCalcResult + ")")
+    var r = Calc.evaluate(expr, opts)
     var display, subtitle
-    if (r.ok) { display = r.grouped; subtitle = q + " =" }
+    if (r.ok) { display = r.grouped; subtitle = q + " ="; root.lastCalcResult = String(r.value) }
     else {
       var u = Units.convert(q)
       if (!u.ok) return null
@@ -251,38 +393,77 @@ Item {
   // The root list is produced here, not by a builtin, because it must be
   // synchronous on every keystroke. `filtering: false` tells the pane that
   // the owner already applied the query.
+  function pageSettings() {
+    var s = root.settings || {}
+    var sec = function(key, def) { var v = s[key]; var out = {}; for (var k in def) out[k] = v && v[k] !== undefined ? v[k] : def[k]; return out }
+    return {
+      suggestionsCap: s.suggestionsCap === undefined || s.suggestionsCap === null ? 5 : Math.max(0, Math.min(8, Number(s.suggestionsCap) || 0)),
+      favoritesSection: sec("favoritesSection", { show: true }),
+      suggestionsSection: sec("suggestionsSection", { show: true }),
+      omarchySection: sec("omarchySection", { show: true, apps: true }),
+      commandsSection: sec("commandsSection", { show: true, apps: true })
+    }
+  }
+
+  // The empty page: Favorites → Suggestions → Omarchy → Commands (lib/RootPage.js).
+  function emptyPageSections() {
+    var scripts = 0
+    try { scripts = scriptsBuiltin.rootEntries().length } catch (e) { scripts = 0 }
+    var built = RootPage.buildRoot({
+      entries: root.entries,
+      favoritesOrder: root.favoritesOrder(),
+      frecencyTop: Frecency.top(root.frecencyData, root.now(), 40),
+      guardOk: root.guardOk,
+      isChecked: root.isChecked,
+      settings: root.pageSettings(),
+      aiAvailable: aiBuiltin.available,
+      extensionsCount: root.extensions.length,
+      scriptsCount: scripts,
+      row: root.entryRow
+    })
+    return built.sections
+  }
+
   function rootView(query) {
     var sections = []
+    var loading = false
     var q = String(query || "").trim()
     if (!q) {
-      var sug = root.suggestions(8)
-      if (sug.length) sections.push({ id: "suggestions", title: "Suggestions", items: sug.map(entryRow) })
-      var seen = {}
-      for (var s = 0; s < sug.length; s++) seen[sug[s].id] = true
-      var rest = root.search("", 0)
-      var items = []
-      for (var i = 0; i < rest.length; i++) if (!seen[rest[i].entry.id]) items.push(entryRow(rest[i].entry))
-      sections.push({ id: "all", title: sug.length ? "All" : "", items: items })
+      sections = root.emptyPageSections()
+    } else if (/^(~\/?|\/)/.test(q)) {
+      // Paths browse the file system inline; Enter on the last row opens the
+      // full file search with the preview pane.
+      var self = root
+      var frows = filesBuiltin.rootRows(q)
+      frows.push({ id: "files:open", title: "Search Files for “" + q + "”", icon: "󰱽", accessories: [{ text: "Command" }], data: {},
+        actions: { sections: [{ actions: [ { id: "open", title: "Open", icon: "󰱽", run: function(item, win) { self.runCommandId("cmd:files", win, { query: q }); return true } } ] }] } })
+      sections.push({ id: "files", title: "Files", items: frows })
+      loading = filesBuiltin.rootPending
     } else {
+      var inline = root.inlineRows(q)
       var calc = root.calculatorRow(q)
-      if (calc) sections.push({ id: "calc", title: "", items: [calc] })
+      if (calc) inline.unshift(calc)
+      var withArg = root.argumentRow(q)
+      if (withArg) inline.unshift(withArg)
+      if (inline.length) sections.push({ id: "inline", title: "", items: inline })
       var ranked = root.search(q, 50)
       var rows = []
       for (var r = 0; r < ranked.length; r++) rows.push(entryRow(ranked[r].entry))
-      if (rows.length) sections.push({ id: "results", title: calc ? "Results" : "", items: rows })
+      if (rows.length) sections.push({ id: "results", title: inline.length ? "Results" : "", items: rows })
       var strong = ranked.length && ranked[0].score >= 9000
       if (!strong || rows.length < 3) {
-        var fb = quicklinksBuiltin.fallbackItems(q)
-        if (aiBuiltin.available && q.length >= 3) fb.unshift(aiBuiltin.quickRow(q))
-        if (fb.length) sections.push({ id: "fallback", title: rows.length ? "Use “" + q + "” with…" : "", items: fb })
+        var fb = fallbacksBuiltin.items(q)
+        if (fb.length) sections.push({ id: "fallback", title: rows.length ? "Use “" + q + "” with…" : "", accessory: { text: "Edit" }, items: fb })
       }
     }
+    var placeholder = root.settings && root.settings.rootPlaceholder ? String(root.settings.rootPlaceholder) : "Search apps and commands…"
     return VM.normalizeView({
       id: "root",
       type: "list",
       filtering: false,
-      searchBarPlaceholder: "Search apps and commands…",
+      searchBarPlaceholder: placeholder,
       searchText: q,
+      isLoading: loading,
       sections: sections,
       emptyView: { icon: "󰍉", title: q ? "No results for “" + q + "”" : "Nothing here yet" }
     })
@@ -314,29 +495,105 @@ Item {
   // Action panel for a root entry.
   function entryActions(entry) {
     var self = root
-    var primary = { id: "primary", title: entry.primaryTitle || (entry.kind === "app" ? "Open" : "Run"), icon: entry.kind === "app" ? "󰏌" : "󰐊",
+    var isCategory = entry.kind === "omarchy-category"
+    var primary = { id: "primary", title: entry.primaryTitle || (entry.kind === "app" ? "Open" : "Run"), icon: entry.kind === "app" ? "󰏌" : (isCategory && entry.accessoryIcon ? "󰍜" : "󰐊"),
       run: function(item, win) { return !self.activateEntry(entry, win) } }
     var secondary = []
-    secondary.push({ id: "favorite", title: entry.favorite ? "Remove from Favorites" : "Add to Favorites", icon: entry.favorite ? "󰓎" : "󰓒",
-      shortcut: { modifiers: ["ctrl", "shift"], key: "f", label: "⌃⇧F" },
-      run: function(item, win) { self.toggleFavorite(entry.id, win); return true } })
+    if (entry.kind === "app" && entry.desktopActions && entry.desktopActions.length) {
+      for (var d = 0; d < entry.desktopActions.length; d++) {
+        (function(da) {
+          secondary.push({ id: "desktop-action:" + da.id, title: da.name, icon: "󰏌", run: function(item, win) { self.recordUse(entry.id); self.launchDesktopAction(entry, da); return false } })
+        })(entry.desktopActions[d])
+      }
+    }
+    if (!isCategory || entry.accessoryIcon !== "›") {
+      secondary.push({ id: "favorite", title: entry.favorite ? "Remove from Favorites" : "Add to Favorites", icon: entry.favorite ? "󰓎" : "󰓒",
+        shortcut: { modifiers: ["ctrl", "shift"], key: "f", label: "⌃⇧F" },
+        run: function(item, win) { self.toggleFavorite(entry.id, win); return true } })
+    }
+    if (entry.favorite) {
+      var favs = self.favoritesOrder()
+      var pos = favs.indexOf(entry.id)
+      if (pos > 0) secondary.push({ id: "move-fav-up", title: "Move Favorite Up", icon: "󰁝", shortcut: { modifiers: ["ctrl", "shift"], key: "arrowUp", label: "⌃⇧↑" },
+        run: function(item, win) { self.moveFavorite(entry.id, -1); if (win) win.onSearchEdited(win.searchTextValue()); return true } })
+      if (pos >= 0 && pos < favs.length - 1) secondary.push({ id: "move-fav-down", title: "Move Favorite Down", icon: "󰁅", shortcut: { modifiers: ["ctrl", "shift"], key: "arrowDown", label: "⌃⇧↓" },
+        run: function(item, win) { self.moveFavorite(entry.id, 1); if (win) win.onSearchEdited(win.searchTextValue()); return true } })
+    }
     if (entry.kind === "app") {
       secondary.push({ id: "copy-name", title: "Copy Application Name", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.title]); return false } })
-      secondary.push({ id: "hide", title: "Hide from Launcher", icon: "󰛑", style: "destructive",
-        run: function(item, win) { win.confirm("Hide " + entry.title + " from the launcher?", "Hide", function() { self.setCommandOverride(entry.id, { enabled: false }); win.showToast({ style: "success", title: "Hidden " + entry.title, message: "Re-enable it in settings.json" }) }); return true } })
-    } else if (entry.raw && (entry.raw.exec || entry.raw.action)) {
+    } else if (entry.raw && (entry.raw.exec || entry.raw.action) && !isCategory) {
       secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.raw.exec || (self.pluginDir + "/bin/wm.sh " + entry.raw.action)]); return false } })
+    } else if (entry.menuEntry && entry.menuEntry.action) {
+      secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", String(entry.menuEntry.action)]); return false } })
     }
-    secondary.push({ id: "configure", title: "Configure Command…", icon: "󰢻", shortcut: { modifiers: ["ctrl", "shift"], key: ",", label: "⌃⇧," },
-      run: function(item, win) { preferencesBuiltin.configure(win, entry); return true } })
+    if (!isCategory) {
+      secondary.push({ id: "configure", title: "Configure Command…", icon: "󰢻", shortcut: { modifiers: ["ctrl", "shift"], key: ",", label: "⌃⇧," },
+        run: function(item, win) { preferencesBuiltin.configure(win, entry); return true } })
+    }
     secondary.push({ id: "copy-deeplink", title: "Copy Deeplink", icon: "󰌹", run: function() {
-      Quickshell.execDetached(["wl-copy", "--", "omarchy-shell " + self.pluginId + " run " + JSON.stringify(entry.id)]); return false } })
-    return { title: entry.title, sections: [{ actions: [primary] }, { actions: secondary }] }
+      var link = isCategory && entry.menuEntry ? "omarchy-shell " + self.pluginId + " menu " + JSON.stringify(entry.menuEntry.id) : "omarchy-shell " + self.pluginId + " run " + JSON.stringify(entry.id)
+      Quickshell.execDetached(["wl-copy", "--", link]); return false } })
+    var danger = []
+    if (Frecency.score(root.frecencyData, entry.id, root.now()) > 0) {
+      danger.push({ id: "reset-ranking", title: "Reset Ranking", icon: "󰑓", shortcut: { modifiers: ["ctrl", "shift"], key: "r", label: "⌃⇧R" },
+        run: function(item, win) { self.resetRanking(entry.id, win); return true } })
+    }
+    if (!isCategory) {
+      danger.push({ id: "disable", title: entry.kind === "app" ? "Hide from Launcher" : "Disable Command", icon: "󰛑", style: "destructive", shortcut: { modifiers: ["ctrl", "shift"], key: "d", label: "⌃⇧D" },
+        run: function(item, win) { self.disableEntry(entry.id, win); return true } })
+    }
+    if (entry.kind === "app") {
+      danger.push({ id: "uninstall", title: "Uninstall Application", icon: "󰆴", style: "destructive", shortcut: { modifiers: [], key: "deleteForward", label: "⌦" },
+        run: function(item, win) { self.uninstallApp(entry.id, win); return true } })
+    }
+    var sections = [{ actions: [primary] }, { actions: secondary }]
+    if (danger.length) sections.push({ actions: danger })
+    return { title: entry.title, sections: sections }
+  }
+
+  function resetRanking(entryId, win) {
+    var e = root.entryById(entryId)
+    root.frecencyData = Frecency.forget(root.frecencyData, String(entryId))
+    root.frecencyDirty = true
+    saveTimer.restart()
+    root.indexRevision += 1
+    root.indexChanged()
+    if (win) win.showToast({ style: "success", title: "Ranking reset", message: e ? e.title : String(entryId) })
+  }
+
+  function disableEntry(entryId, win) {
+    var e = root.entryById(entryId)
+    if (!e) return
+    var verb = e.kind === "app" ? "Hide " : "Disable "
+    var doIt = function() {
+      root.setCommandOverride(e.id, { enabled: false })
+      if (win) win.showToast({ style: "success", title: (e.kind === "app" ? "Hidden " : "Disabled ") + e.title, message: "Re-enable it in Preferences › Commands" })
+    }
+    if (win) win.confirm(verb + e.title + (e.kind === "app" ? " from the launcher?" : "? It disappears from search until re-enabled."), e.kind === "app" ? "Hide" : "Disable", doIt)
+    else doIt()
+  }
+
+  function uninstallApp(entryId, win) {
+    var e = root.entryById(entryId)
+    if (!e || e.kind !== "app") return
+    var doIt = function() {
+      Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-remove-launcher-entry", String(e.desktopId), String(e.title)])
+      if (win) win.dismiss()
+    }
+    if (win) win.confirm("Uninstall " + e.title + "? Omarchy removes the package or web app behind it.", "Uninstall", doIt)
+    else doIt()
   }
 
   function setSetting(key, value) {
+    var patch = {}
+    patch[key] = value
+    root.setSettings(patch)
+  }
+
+  // Assign several keys, write settings.json once, rebuild once.
+  function setSettings(patch) {
     var s = root.settings && typeof root.settings === "object" ? root.settings : { version: 1 }
-    s[key] = value
+    for (var k in patch) { if (patch[k] === undefined) delete s[k]; else s[k] = patch[k] }
     s.version = 1
     root.settings = s
     settingsFile.setText(JSON.stringify(s, null, 2) + "\n")
@@ -359,7 +616,16 @@ Item {
     var e = root.entryById(entryId)
     if (!e) return
     var next = !e.favorite
-    root.setCommandOverride(entryId, { favorite: next })
+    var l = root.favoritesOrder().filter(function(id) { return id !== e.id })
+    if (next) l.push(e.id)
+    // Keep the legacy flag in sync so older settings readers agree.
+    var s = root.settings && typeof root.settings === "object" ? root.settings : { version: 1 }
+    if (!s.commands || typeof s.commands !== "object") s.commands = {}
+    var cur = s.commands[e.id] || {}
+    cur.favorite = next
+    s.commands[e.id] = cur
+    root.settings = s
+    root.setFavoritesOrder(l)
     if (win) {
       win.showToast({ style: "success", title: next ? "Added to Favorites" : "Removed from Favorites", message: e.title })
       win.onSearchEdited(win.searchTextValue())
@@ -368,40 +634,96 @@ Item {
 
   // ------------------------------------------------------------- guards
 
-  // Evaluate every catalog when/checked guard in one bash call. Runs when
-  // the window opens so toggles show their state.
+  // Evaluate the when/checked guards that decide what the root shows, in one
+  // bash call through the stock menu's prelude (package cache, reader slots):
+  // every catalog command with a guard, the Omarchy categories and their
+  // direct children, and the Omarchy leaves currently on the page. Runs when
+  // the window opens; rows render from the previous answers meanwhile.
+  property bool guardsPending: false
+  property bool deepGuardsPending: false
+  property double deepGuardsAt: 0
   function evaluateGuards() {
-    var script = ""
-    var count = 0
+    var list = []
     var all = root.commandEntries
     for (var i = 0; i < all.length; i++) {
       var raw = all[i].raw
-      if (!raw) continue
-      if (raw.when) { script += "if ( " + raw.when + " ) >/dev/null 2>&1; then echo 'W " + all[i].id + " 1'; else echo 'W " + all[i].id + " 0'; fi\n"; count++ }
-      if (raw.checked) { script += "if ( " + raw.checked + " ) >/dev/null 2>&1; then echo 'C " + all[i].id + " 1'; else echo 'C " + all[i].id + " 0'; fi\n"; count++ }
+      if (raw && (raw.when || raw.checked)) list.push({ id: all[i].id, when: raw.when, checked: raw.checked })
     }
-    if (!count || guardProc.running) return
+    try {
+      list = list.concat(omarchyMenuBuiltin.shallowGuardEntries())
+      var onPage = root.favoritesOrder().concat(Frecency.top(root.frecencyData, root.now(), 20))
+      list = list.concat(omarchyMenuBuiltin.guardLinesFor(onPage))
+    } catch (e) { console.warn("launcher: omarchy guard scope failed", e) }
+    root.runGuardBatch(list, false)
+  }
+
+  // The rest of the tree (deeper Omarchy leaves such as Install › Browser ›
+  // Chrome) is evaluated in a second batch after the shallow one lands, at
+  // most every ten minutes: it costs ~2.5 s of pacman queries in the
+  // background and only affects what typing can surface.
+  function evaluateDeepGuards() {
+    if (Date.now() - root.deepGuardsAt < 10 * 60 * 1000) return
+    var list = []
+    try { list = omarchyMenuBuiltin.deepGuardEntries() } catch (e) { list = [] }
+    if (!list.length) return
+    root.deepGuardsAt = Date.now()
+    root.runGuardBatch(list, true)
+  }
+
+  function runGuardBatch(list, deep) {
+    var seen = {}
+    list = list.filter(function(g) { if (seen[g.id]) return false; seen[g.id] = true; return true })
+    var script = Menu.guardScript(list)
+    if (!script) return
+    if (guardProc.running) { if (deep) root.deepGuardsPending = true; else root.guardsPending = true; return }
+    if (deep) root.deepGuardsPending = false; else root.guardsPending = false
+    guardProc.deep = deep
+    guardProc.collected = ""
     guardProc.command = ["bash", "-lc", script]
     guardProc.running = true
   }
 
   Process {
     id: guardProc
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var lines = String(text || "").split("\n")
-        var next = {}
-        for (var i = 0; i < lines.length; i++) {
-          var m = lines[i].match(/^([WC]) (\S+) ([01])$/)
-          if (!m) continue
-          var g = next[m[2]] || {}
-          if (m[1] === "W") g.when = m[3] === "1"; else g.checked = m[3] === "1"
-          next[m[2]] = g
-        }
-        root.guardResults = next
-        root.indexRevision += 1
-        root.indexChanged()
+    property string collected: ""
+    property bool deep: false
+    stdout: SplitParser { onRead: function(line) { guardProc.collected += line + "\n" } }
+    onExited: function(exitCode, exitStatus) {
+      var wasDeep = guardProc.deep
+      var followUp = function() {
+        if (root.guardsPending) root.evaluateGuards()
+        else if (root.deepGuardsPending) root.evaluateDeepGuards()
+        else if (!wasDeep) root.evaluateDeepGuards()
       }
+      // A killed batch answered only for the rows it reached; keep the last
+      // complete map rather than let half an answer through.
+      if (exitCode !== 0 || exitStatus !== 0) {
+        if (wasDeep) root.deepGuardsAt = 0
+        Qt.callLater(followUp)
+        return
+      }
+      var lines = guardProc.collected.split("\n")
+      var next = {}
+      var any = false
+      for (var i = 0; i < lines.length; i++) {
+        var m = lines[i].match(/^([WC]) (\S+) ([01])$/)
+        if (!m) continue
+        any = true
+        var g = next[m[2]] || {}
+        if (m[1] === "W") g.when = m[3] === "1"; else g.checked = m[3] === "1"
+        next[m[2]] = g
+      }
+      if (any) {
+        // The shallow batch is authoritative for what it covers; the deep
+        // batch only adds ids the shallow one never answers.
+        if (wasDeep) { var merged = {}; for (var k in root.guardResults) merged[k] = root.guardResults[k]; for (var d in next) merged[d] = next[d]; root.guardResults = merged }
+        else { var kept = {}; for (var k2 in root.guardResults) if (String(k2).indexOf("omenu:") === 0 && next[k2] === undefined) kept[k2] = root.guardResults[k2]; for (var n in next) kept[n] = next[n]; root.guardResults = kept }
+        try { omarchyMenuBuiltin.mergeGuards(next) } catch (e) {}
+        // Category subtitles preview visible children, so rebuild the index
+        // (it also emits indexChanged, which re-renders the root).
+        root.rebuildIndex()
+      }
+      Qt.callLater(followUp)
     }
   }
 
@@ -430,9 +752,73 @@ Item {
   function launchApp(desktopId, name) {
     var id = Apps.normalizeDesktopId(desktopId)
     if (!id) return
+    root.beginLaunchFeedback(name)
     // Same launch path as the stock menu: uwsm-app scopes the app under
     // app-graphical.slice, gtk-launch resolves the desktop id.
     Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", id + ".desktop"])
+  }
+
+  // A .desktop [Desktop Action] (e.g. "New Private Window"), scoped like the
+  // app itself.
+  function launchDesktopAction(entry, action) {
+    var cmd = action && action.command ? Apps.listToArray(action.command) : []
+    if (!cmd.length) return
+    root.beginLaunchFeedback(action.name || entry.title)
+    Quickshell.execDetached(["uwsm-app", "--"].concat(cmd))
+  }
+
+  // Launch feedback, as the stock launcher does it: if no new window shows
+  // up within two seconds, an OSD says the app is starting; it closes when
+  // a toplevel appears or after fifteen seconds.
+  property int launchSerial: 0
+  property int launchToplevelCount: 0
+  property var launchActiveToplevel: null
+  property string launchOsdMessage: ""
+  property bool launchOsdOpen: false
+  function toplevelCount() { try { return ToplevelManager.toplevels.values.length } catch (e) { return 0 } }
+  function beginLaunchFeedback(name) {
+    root.launchSerial += 1
+    root.launchToplevelCount = root.toplevelCount()
+    root.launchActiveToplevel = ToplevelManager.activeToplevel
+    root.launchOsdMessage = "Launching " + String(name || "application") + "…"
+    launchDelay.restart()
+    launchTimeout.restart()
+  }
+  function closeLaunchFeedback() {
+    launchDelay.stop()
+    launchTimeout.stop()
+    if (root.launchOsdOpen) {
+      Quickshell.execDetached(["omarchy-shell", "osd", "close"])
+      root.launchOsdOpen = false
+    }
+  }
+  function maybeFinishLaunchFeedback() {
+    if (!launchDelay.running && !launchTimeout.running && !root.launchOsdOpen) return
+    if (root.toplevelCount() > root.launchToplevelCount || ToplevelManager.activeToplevel !== root.launchActiveToplevel) root.closeLaunchFeedback()
+  }
+  Connections {
+    target: ToplevelManager.toplevels
+    ignoreUnknownSignals: true
+    function onValuesChanged() { root.maybeFinishLaunchFeedback() }
+  }
+  Connections {
+    target: ToplevelManager
+    ignoreUnknownSignals: true
+    function onActiveToplevelChanged() { root.maybeFinishLaunchFeedback() }
+  }
+  Timer {
+    id: launchDelay
+    interval: 2000
+    onTriggered: {
+      if (root.toplevelCount() > root.launchToplevelCount || ToplevelManager.activeToplevel !== root.launchActiveToplevel) return
+      root.launchOsdOpen = true
+      Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({ icon: "󱓞", message: root.launchOsdMessage, duration: 0 })])
+    }
+  }
+  Timer {
+    id: launchTimeout
+    interval: 15000
+    onTriggered: root.closeLaunchFeedback()
   }
 
   function rebuildApps() {
@@ -448,6 +834,11 @@ Item {
       var kw = Apps.listToArray(app.keywords)
       if (app.comment) kw.push(String(app.comment))
       if (app.genericName) kw.push(String(app.genericName))
+      var dactions = []
+      try {
+        var acts = app.actions || []
+        for (var a = 0; a < acts.length; a++) if (acts[a] && acts[a].name) dactions.push({ id: String(acts[a].id || a), name: String(acts[a].name), command: acts[a].command })
+      } catch (e2) { dactions = [] }
       out.push({
         id: "app:" + id,
         kind: "app",
@@ -462,6 +853,7 @@ Item {
         favorite: false,
         primaryTitle: "Open",
         desktopId: id,
+        desktopActions: dactions,
         run: function(e) { root.launchApp(e.desktopId, e.title) }
       })
     }
@@ -549,6 +941,9 @@ Item {
   Builtins.Reminders { id: remindersBuiltin; service: root }
   Builtins.Colors { id: colorsBuiltin; service: root }
   Builtins.Ai { id: aiBuiltin; service: root }
+  Builtins.Arguments { id: argumentsBuiltin; service: root }
+  Builtins.Fallbacks { id: fallbacksBuiltin; service: root }
+  readonly property var ai: aiBuiltin
 
   // ------------------------------------------------------------- extensions
 
@@ -591,23 +986,41 @@ Item {
           primaryTitle: cmd.mode === "no-view" ? "Run" : (cmd.mode === "menu-bar" ? (root.menuBarActive(ext.id + "/" + cmd.name) ? "Show Items" : "Add to Bar") : "Open"),
           extension: ext,
           command: cmd,
-          run: function(e, win) {
-            if (root.missingRequiredPrefs(e.extension, e.command).length) { preferencesBuiltin.configureExtension(win, e.extension, e.command, true); return true }
-            if (e.command.mode === "menu-bar") {
-              var key = e.extension.id + "/" + e.command.name
-              if (root.menuBarActive(key)) { win.pushView(root.menubarView(key), null); return true }
-              root.setMenuBarActive(key, true)
-              win.showToast({ style: "success", title: "Added to the bar", message: e.command.title })
-              return true
-            }
-            extensionHost.launch(e.extension, e.command, win, {})
-            return true
-          }
+          acceptsArgument: (cmd.arguments || []).length > 0,
+          run: function(e, win) { return root.runExtensionEntry(e, win, null) },
+          runWithArgument: function(e, win, text) { return root.runExtensionEntry(e, win, text) }
         })
       }
     }
     return out
   }
+
+  // Launch an extension command from its root entry. Commands that declare
+  // `arguments` prompt for them first (or take the typed text as the first
+  // one, Raycast's "alias text" contract).
+  function runExtensionEntry(e, win, text) {
+    if (root.missingRequiredPrefs(e.extension, e.command).length) { preferencesBuiltin.configureExtension(win, e.extension, e.command, true); return true }
+    if (e.command.mode === "menu-bar") {
+      var key = e.extension.id + "/" + e.command.name
+      if (root.menuBarActive(key)) { win.pushView(root.menubarView(key), null); return true }
+      root.setMenuBarActive(key, true)
+      win.showToast({ style: "success", title: "Added to the bar", message: e.command.title })
+      return true
+    }
+    var defs = e.command.arguments || []
+    var values = {}
+    if (defs.length && text !== null && text !== undefined && String(text).length) values[String(defs[0].name || "arg1")] = String(text)
+    var missingRequired = defs.some(function(a, i) { return a.required && !values[String(a.name || ("arg" + (i + 1)))] })
+    if (missingRequired && win) {
+      argumentsBuiltin.prompt(win, e.command.title, defs, function(vals) { extensionHost.launch(e.extension, e.command, win, { arguments: vals }) })
+      return true
+    }
+    extensionHost.launch(e.extension, e.command, win, { arguments: values })
+    return true
+  }
+
+  // Ask for named arguments with a pushed form, then call onDone(values).
+  function promptArguments(win, title, defs, onDone) { argumentsBuiltin.prompt(win, title, defs, onDone) }
 
   function findExtension(extId) {
     for (var i = 0; i < root.extensions.length; i++) if (root.extensions[i].id === extId || root.extensions[i].name === extId) return root.extensions[i]
@@ -780,7 +1193,7 @@ Item {
   Process {
     id: mkdirProc
     command: ["mkdir", "-p", root.stateDir, root.configDir]
-    onExited: { frecencyFile.reload(); settingsFile.reload(); snippetsBuiltin.reload(); quicklinksBuiltin.reload() }
+    onExited: { frecencyFile.reload(); settingsFile.reload(); historyFile.reload(); snippetsBuiltin.reload(); quicklinksBuiltin.reload() }
   }
 
   FileView {
@@ -805,11 +1218,37 @@ Item {
     onLoaded: {
       var data = null
       try { data = JSON.parse(text()) } catch (e) { data = null }
-      root.settings = data && typeof data === "object" ? data : { version: 1, commands: {} }
+      var next = data && typeof data === "object" ? data : { version: 1, commands: {} }
+      var migrated = RootPage.migrateFavorites(next)
+      root.settings = migrated.settings
+      if (migrated.migrated) settingsFile.setText(JSON.stringify(root.settings, null, 2) + "\n")
       root.rebuildIndex()
     }
-    onLoadFailed: root.settings = { version: 1, commands: {} }
+    onLoadFailed: root.settings = { version: 1, commands: {}, favoritesOrder: [] }
     onFileChanged: reload()
+  }
+
+  // Root queries that led somewhere, newest first (↑ on the first row recalls them).
+  FileView {
+    id: historyFile
+    path: root.stateDir + "/search-history.json"
+    atomicWrites: true
+    printErrors: false
+    onLoaded: { try { var h = JSON.parse(text()); root.searchHistoryList = Array.isArray(h) ? h.map(String) : [] } catch (e) { root.searchHistoryList = [] } }
+    onLoadFailed: root.searchHistoryList = []
+  }
+  function searchHistory() { return root.searchHistoryList }
+  function recordSearch(query) {
+    var q = String(query || "").trim()
+    if (!q) return
+    if (root.settings && root.settings.searchHistory && root.settings.searchHistory.enabled === false) return
+    var l = [q].concat(root.searchHistoryList.filter(function(x) { return x !== q })).slice(0, 50)
+    root.searchHistoryList = l
+    historyFile.setText(JSON.stringify(l) + "\n")
+  }
+  function clearSearchHistory() {
+    root.searchHistoryList = []
+    historyFile.setText("[]\n")
   }
 
   Timer {
@@ -842,6 +1281,10 @@ Item {
     }
     function search(text: string): string {
       return root.shell && root.shell.summon(root.pluginId, JSON.stringify({ query: text })) ? "ok" : "unavailable"
+    }
+    // omarchy-shell <plugin> menu settings   (menu id or jsonc alias, like `omarchy menu summon`)
+    function menu(name: string): string {
+      return root.shell && root.shell.summon(root.pluginId, JSON.stringify({ menu: name || "root" })) ? "ok" : "unavailable"
     }
     function reindex(): string { root.rebuildApps(); extensionsIndex.reload(); return "ok" }
     function oauth(payloadB64: string): string {

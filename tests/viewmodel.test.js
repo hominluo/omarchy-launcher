@@ -9,8 +9,31 @@ test("normalizes a flat item list into one section and flattens rows", () => {
   assert.equal(rows.length, 2)
   assert.equal(rows[0].iconKind, "emoji")
   assert.equal(rows[1].iconKind, "glyph")
-  assert.equal(rows[1].accessoryText, "x  y")
+  assert.equal(rows[1].accessoryText, "x")
+  assert.equal(rows[1].tagText, "y")
   assert.equal(rows[1].itemId, "b")
+})
+
+test("every row carries every role as a string", () => {
+  const v = VM.normalizeView({ type: "list", sections: [
+    { id: "favorites", title: "Favorites", accessory: { text: "Edit" }, items: [{ id: "a", title: "A", accessories: [{ tag: "ff" }, { hotkey: "SUPER + F" }, { icon: "✓" }, { text: "Application" }, { icon: "›" }] }] },
+    { id: "plain", title: "", items: [{ id: "b", title: "B" }] }
+  ] })
+  assert.equal(v.sections[0].accessory.text, "Edit")
+  const rows = VM.flattenList(v, "")
+  for (const row of rows) for (const role of VM.ROW_ROLES) {
+    assert.ok(role in row, role + " missing")
+    if (role !== "hasActions") assert.equal(typeof row[role], "string", role + " is not a string")
+  }
+  assert.equal(rows[0].sectionAccessory, "Edit")
+  assert.equal(rows[0].tagText, "ff")
+  assert.equal(rows[0].hotkeyText, "SUPER + F")
+  assert.equal(rows[0].accessoryIcon, "glyph|✓")
+  assert.equal(rows[0].chevron, "1")
+  assert.equal(rows[0].accessoryText, "Application")
+  assert.equal(rows[1].sectionAccessory, "")
+  assert.equal(rows[1].chevron, "")
+  assert.equal(rows[1].tagText, "")
 })
 
 test("host filtering respects the filtering flag", () => {

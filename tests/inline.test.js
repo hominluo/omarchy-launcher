@@ -1,0 +1,36 @@
+const test = require("node:test")
+const assert = require("node:assert/strict")
+const I = require("../lib/Inline.js")
+
+test("detectUrl accepts urls, domains, localhost and ips", () => {
+  assert.equal(I.detectUrl("https://example.com/x?y=1"), "https://example.com/x?y=1")
+  assert.equal(I.detectUrl("example.com"), "https://example.com")
+  assert.equal(I.detectUrl("github.com/raycast/extensions"), "https://github.com/raycast/extensions")
+  assert.equal(I.detectUrl("localhost:3000"), "http://localhost:3000")
+  assert.equal(I.detectUrl("192.168.1.1/admin"), "http://192.168.1.1/admin")
+  assert.equal(I.detectUrl("mailto:a@b.co"), "mailto:a@b.co")
+})
+
+test("detectUrl rejects ordinary words and expressions", () => {
+  assert.equal(I.detectUrl("firefox"), "")
+  assert.equal(I.detectUrl("open firefox"), "")
+  assert.equal(I.detectUrl("1+1"), "")
+  assert.equal(I.detectUrl("system.lock"), "")
+  assert.equal(I.detectUrl("file.txt"), "")
+  assert.equal(I.detectUrl("javascript://x"), "")
+  assert.equal(I.hostOf("https://example.com/x"), "example.com")
+})
+
+test("parseColor handles hex, rgb and hsl", () => {
+  assert.equal(I.parseColor("#fff").hex, "#ffffff")
+  assert.equal(I.parseColor("#ff8000").formats.rgb, "rgb(255, 128, 0)")
+  assert.equal(I.parseColor("ff8000").hex, "#ff8000")
+  assert.equal(I.parseColor("123456"), null)
+  assert.equal(I.parseColor("rgb(255, 0, 0)").hex, "#ff0000")
+  assert.equal(I.parseColor("rgba(255,0,0,0.5)").formats.hex, "#ff000080")
+  assert.equal(I.parseColor("hsl(120, 100%, 50%)").hex, "#00ff00")
+  assert.equal(I.parseColor("hsl(0, 0%, 100%)").formats.hsl, "hsl(0, 0%, 100%)")
+  assert.equal(I.parseColor("rgb(300,0,0)"), null)
+  assert.equal(I.parseColor("hello"), null)
+  assert.equal(I.parseColor("#12345"), null)
+})

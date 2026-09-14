@@ -113,7 +113,8 @@
     ],
     "icon": "󰖔",
     "exec": "omarchy-toggle-nightlight",
-    "checked": "omarchy-toggle-nightlight --status"
+    "checked": "[[ \"$(omarchy-toggle-nightlight --status 2>/dev/null)\" == *'\"enabled\":true'* ]]",
+    "keepOpen": true
   },
   {
     "id": "dnd",
@@ -125,7 +126,9 @@
       "focus"
     ],
     "icon": "󰂜",
-    "exec": "omarchy-toggle-notification-silencing"
+    "exec": "omarchy-toggle-notification-silencing",
+    "checked": "[[ \"$(omarchy-shell notifications isDnd 2>/dev/null)\" == \"on\" ]]",
+    "keepOpen": true
   },
   {
     "id": "stay-awake",
@@ -138,7 +141,9 @@
       "insomnia"
     ],
     "icon": "󰛊",
-    "exec": "omarchy-toggle-idle toggle"
+    "exec": "omarchy-toggle-idle",
+    "checked": "[[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ]]",
+    "keepOpen": true
   },
   {
     "id": "toggle-bar",
@@ -150,7 +155,9 @@
       "hide"
     ],
     "icon": "󰍜",
-    "exec": "omarchy-toggle-bar"
+    "exec": "omarchy-toggle-bar",
+    "checked": "! omarchy-toggle-enabled bar-off",
+    "keepOpen": true
   },
   {
     "id": "volume-up",
@@ -308,7 +315,9 @@
       "wireless"
     ],
     "icon": "󰂯",
-    "exec": "omarchy-bluetooth-power toggle"
+    "exec": "omarchy-bluetooth-power toggle",
+    "checked": "omarchy-bluetooth-power is-on",
+    "keepOpen": true
   },
   {
     "id": "theme-next-background",
@@ -364,7 +373,9 @@
       "window"
     ],
     "icon": "󰁌",
-    "exec": "omarchy-hyprland-window-gaps-toggle"
+    "exec": "omarchy-hyprland-window-gaps-toggle",
+    "checked": "! omarchy-hyprland-toggle-enabled window-no-gaps",
+    "keepOpen": true
   },
   {
     "id": "restart-shell",
@@ -415,5 +426,260 @@
     ],
     "icon": "󰥻",
     "exec": "omarchy-menu-keybindings"
+  },
+  {
+    "id": "wifi-toggle",
+    "title": "Toggle Wi-Fi",
+    "icon": "󰖩",
+    "keywords": [
+      "wireless",
+      "network",
+      "radio",
+      "wlan"
+    ],
+    "exec": "if nmcli radio wifi | grep -q enabled; then nmcli radio wifi off; else nmcli radio wifi on; fi",
+    "checked": "nmcli radio wifi | grep -q enabled",
+    "keepOpen": true
+  },
+  {
+    "id": "crash-capture",
+    "title": "Toggle Crash Capture",
+    "subtitle": "Crash notifications",
+    "icon": "󱚡",
+    "keywords": [
+      "crash",
+      "capture",
+      "coredump",
+      "debug"
+    ],
+    "exec": "omarchy-toggle-crash-capture",
+    "checked": "! omarchy-toggle-enabled crash-capture-off",
+    "keepOpen": true
+  },
+  {
+    "id": "screensaver-toggle",
+    "title": "Toggle Screensaver",
+    "subtitle": "Screensaver availability when idle",
+    "icon": "󱄄",
+    "keywords": [
+      "idle",
+      "screen saver"
+    ],
+    "exec": "omarchy-toggle-screensaver",
+    "checked": "! omarchy-toggle-enabled screensaver-off",
+    "keepOpen": true
+  },
+  {
+    "id": "workspace-layout",
+    "title": "Toggle Workspace Layout",
+    "subtitle": "Dwindle ⇄ scrolling on the active workspace",
+    "icon": "󱂬",
+    "keywords": [
+      "layout",
+      "dwindle",
+      "scrolling",
+      "tiling"
+    ],
+    "exec": "omarchy-hyprland-workspace-layout-toggle",
+    "checked": "[[ \"$(hyprctl activeworkspace -j 2>/dev/null | jq -r .tiledLayout)\" == \"scrolling\" ]]",
+    "keepOpen": true
+  },
+  {
+    "id": "one-window-ratio",
+    "title": "Toggle 1-Window Ratio",
+    "subtitle": "Square aspect for a lone window",
+    "icon": "",
+    "keywords": [
+      "single",
+      "window",
+      "aspect",
+      "ratio",
+      "square"
+    ],
+    "exec": "omarchy-hyprland-window-single-square-aspect-toggle",
+    "checked": "omarchy-hyprland-toggle-enabled single-window-aspect-ratio",
+    "keepOpen": true
+  },
+  {
+    "id": "battery-percentage",
+    "title": "Toggle Battery Percentage",
+    "subtitle": "Show the percentage in the bar",
+    "icon": "󰁹",
+    "keywords": [
+      "battery",
+      "power",
+      "bar"
+    ],
+    "exec": "omarchy-shell omarchy.power togglePercentage",
+    "when": "omarchy-hw-laptop"
+  },
+  {
+    "id": "touchpad-toggle",
+    "title": "Toggle Touchpad",
+    "icon": "󰟸",
+    "keywords": [
+      "trackpad",
+      "input",
+      "mouse"
+    ],
+    "exec": "omarchy-toggle-touchpad",
+    "when": "omarchy-hw-touchpad",
+    "checked": "[[ ! -f \"$HOME/.local/state/omarchy/toggles/hypr/touchpad-disabled-name\" ]]",
+    "keepOpen": true
+  },
+  {
+    "id": "touchscreen-toggle",
+    "title": "Toggle Touchscreen",
+    "icon": "󰆽",
+    "keywords": [
+      "touch",
+      "input"
+    ],
+    "exec": "omarchy-toggle-touchscreen",
+    "when": "omarchy-hw-touchscreen",
+    "checked": "[[ ! -f \"$HOME/.local/state/omarchy/toggles/hypr/touchscreen-disabled-name\" ]]",
+    "keepOpen": true
+  },
+  {
+    "id": "laptop-display",
+    "title": "Toggle Laptop Display",
+    "subtitle": "Internal panel on or off",
+    "icon": "󰛧",
+    "keywords": [
+      "internal",
+      "monitor",
+      "screen",
+      "lid"
+    ],
+    "exec": "omarchy-hyprland-monitor-internal toggle",
+    "when": "omarchy-hw-laptop",
+    "checked": "! omarchy-hyprland-toggle-enabled internal-monitor-disable",
+    "keepOpen": true
+  },
+  {
+    "id": "mirror-display",
+    "title": "Toggle Mirror Display",
+    "subtitle": "Mirror the laptop panel to the external monitor",
+    "icon": "󰍹",
+    "keywords": [
+      "mirror",
+      "monitor",
+      "external",
+      "projector"
+    ],
+    "exec": "omarchy-hyprland-monitor-internal-mirror toggle",
+    "when": "omarchy-hw-laptop",
+    "checked": "omarchy-hyprland-toggle-enabled internal-monitor-mirror",
+    "keepOpen": true
+  },
+  {
+    "id": "hybrid-gpu",
+    "title": "Toggle Hybrid GPU",
+    "icon": "",
+    "keywords": [
+      "gpu",
+      "graphics",
+      "nvidia",
+      "optimus"
+    ],
+    "exec": "omarchy-launch-floating-terminal-with-presentation omarchy-toggle-hybrid-gpu",
+    "when": "omarchy-hw-hybrid-gpu"
+  },
+  {
+    "id": "speedtest-network",
+    "title": "Network Speed Test",
+    "icon": "󰓅",
+    "keywords": [
+      "speed",
+      "test",
+      "bandwidth",
+      "internet",
+      "download"
+    ],
+    "exec": "omarchy-shell shell summon omarchy.speedtest"
+  },
+  {
+    "id": "speedtest-disk",
+    "title": "Disk Speed Test",
+    "icon": "󰋊",
+    "keywords": [
+      "speed",
+      "test",
+      "disk",
+      "ssd",
+      "benchmark"
+    ],
+    "exec": "omarchy-shell shell summon omarchy.disk-speedtest"
+  },
+  {
+    "id": "volume-0",
+    "title": "Mute Volume (0%)",
+    "subtitle": "Set output volume to 0%",
+    "icon": "󰝟",
+    "keywords": [
+      "volume",
+      "set",
+      "silent",
+      "audio"
+    ],
+    "exec": "pactl set-sink-volume @DEFAULT_SINK@ 0%"
+  },
+  {
+    "id": "volume-25",
+    "title": "Set Volume 25%",
+    "icon": "󰕿",
+    "keywords": [
+      "volume",
+      "set",
+      "audio"
+    ],
+    "exec": "pactl set-sink-volume @DEFAULT_SINK@ 25%"
+  },
+  {
+    "id": "volume-50",
+    "title": "Set Volume 50%",
+    "icon": "󰖀",
+    "keywords": [
+      "volume",
+      "set",
+      "audio"
+    ],
+    "exec": "pactl set-sink-volume @DEFAULT_SINK@ 50%"
+  },
+  {
+    "id": "volume-75",
+    "title": "Set Volume 75%",
+    "icon": "󰕾",
+    "keywords": [
+      "volume",
+      "set",
+      "audio"
+    ],
+    "exec": "pactl set-sink-volume @DEFAULT_SINK@ 75%"
+  },
+  {
+    "id": "volume-100",
+    "title": "Set Volume 100%",
+    "icon": "󰕾",
+    "keywords": [
+      "volume",
+      "set",
+      "max",
+      "audio"
+    ],
+    "exec": "pactl set-sink-volume @DEFAULT_SINK@ 100%"
+  },
+  {
+    "id": "show-desktop",
+    "title": "Show Desktop",
+    "subtitle": "Switch to an empty workspace",
+    "icon": "󰇄",
+    "keywords": [
+      "desktop",
+      "empty",
+      "workspace",
+      "hide windows"
+    ],
+    "exec": "hyprctl dispatch workspace empty"
   }
 ]

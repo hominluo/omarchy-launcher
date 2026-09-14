@@ -387,6 +387,7 @@ var USAGE = `launcher \u2014 Omarchy Launcher command line
   launcher ext prefs <owner/name>        open the extension's preferences in the launcher
   launcher open [json]                   open the launcher (optional payload)
   launcher run <command-id>              run a launcher command, e.g. cmd:clipboard
+  launcher menu [id|alias]               open the Omarchy menu browser (e.g. settings, system, style.font)
   launcher url <uri>                     handle a raycast:// or omarchy-launcher:// link
   launcher status                        runtime status
 `;
@@ -606,6 +607,9 @@ async function main(argv) {
       return;
     case "run":
       process.stdout.write(shell("run", sub) + "\n");
+      return;
+    case "menu":
+      process.stdout.write(shell("menu", sub || "root") + "\n");
       return;
     case "toggle":
       process.stdout.write(shell("toggle") + "\n");

@@ -12,6 +12,32 @@ arg="${2:-}"
 
 d() { hyprctl dispatch "$@" >/dev/null; }
 
+# Geometry of the focused window before a placement, so "Restore Previous
+# Size" can put it back (one slot per window address, in the runtime dir).
+state_dir="${XDG_RUNTIME_DIR:-/tmp}/omarchy-launcher/wm"
+save_geometry() {
+  local win
+  win=$(hyprctl -j activewindow 2>/dev/null) || return 0
+  local addr
+  addr=$(jq -r '.address // empty' <<<"$win")
+  [[ -n $addr ]] || return 0
+  mkdir -p "$state_dir"
+  jq -c '{floating: .floating, at: .at, size: .size}' <<<"$win" >"$state_dir/${addr#0x}.json"
+}
+restore_geometry() {
+  local addr
+  addr=$(hyprctl -j activewindow 2>/dev/null | jq -r '.address // empty')
+  [[ -n $addr && -f "$state_dir/${addr#0x}.json" ]] || { echo "wm.sh: nothing to restore" >&2; exit 1; }
+  local floating x y w h
+  read -r floating x y w h < <(jq -r '[.floating, .at[0], .at[1], .size[0], .size[1]] | @sh' "$state_dir/${addr#0x}.json" | tr -d "'")
+  if [[ $floating == "true" ]]; then
+    hyprctl --batch "dispatch setfloating; dispatch resizeactive exact $w $h; dispatch moveactive exact $x $y" >/dev/null
+  else
+    d settiled
+  fi
+  rm -f "$state_dir/${addr#0x}.json"
+}
+
 case "$action" in
   fullscreen)        d fullscreen 0; exit ;;
   maximize-tiled)    d fullscreen 1; exit ;;
@@ -22,6 +48,15 @@ case "$action" in
   prev-display)      d movewindow mon:-1; d focusmonitor -1; exit ;;
   workspace)         d movetoworkspace "$arg"; exit ;;
   workspace-silent)  d movetoworkspacesilent "$arg"; exit ;;
+  workspace-next)    d movetoworkspace r+1; exit ;;
+  workspace-prev)    d movetoworkspace r-1; exit ;;
+  switch-next)       d workspace r+1; exit ;;
+  switch-prev)       d workspace r-1; exit ;;
+  move-up)           save_geometry; d setfloating; d moveactive 0 -50; exit ;;
+  move-down)         save_geometry; d setfloating; d moveactive 0 50; exit ;;
+  move-left)         save_geometry; d setfloating; d moveactive -50 0; exit ;;
+  move-right)        save_geometry; d setfloating; d moveactive 50 0; exit ;;
+  restore)           restore_geometry; exit ;;
   scratchpad)        d movetoworkspacesilent special:scratchpad; exit ;;
   close)             d killactive; exit ;;
   close-others)
@@ -43,9 +78,10 @@ ay=$(awk -v y="$my" -v r="$r1" -v g="$gap" 'BEGIN{printf "%d", y + r + g}')
 aw=$(awk -v w="$mw" -v s="$scale" -v l="$r0" -v r="$r2" -v g="$gap" 'BEGIN{printf "%d", w/s - l - r - 2*g}')
 ah=$(awk -v h="$mh" -v s="$scale" -v t="$r1" -v b="$r3" -v g="$gap" 'BEGIN{printf "%d", h/s - t - b - 2*g}')
 
-place() { # x y w h  (fractions of the work area, or absolute with abs=1)
+place() { # x y w h  (fractions of the work area)
   local fx=$1 fy=$2 fw=$3 fh=$4
   local x y w h
+  save_geometry
   x=$(awk -v a="$ax" -v w="$aw" -v f="$fx" -v g="$gap" 'BEGIN{printf "%d", a + w*f + (f>0 ? g/2 : 0)}')
   y=$(awk -v a="$ay" -v h="$ah" -v f="$fy" -v g="$gap" 'BEGIN{printf "%d", a + h*f + (f>0 ? g/2 : 0)}')
   w=$(awk -v w="$aw" -v f="$fw" -v g="$gap" 'BEGIN{printf "%d", w*f - (f<1 ? g/2 : 0)}')
@@ -55,6 +91,7 @@ place() { # x y w h  (fractions of the work area, or absolute with abs=1)
 
 place_abs() { # w h (logical), centered
   local w=$1 h=$2
+  save_geometry
   (( w > aw )) && w=$aw
   (( h > ah )) && h=$ah
   local x y
@@ -84,8 +121,18 @@ case "$action" in
   reasonable-size)  place_abs 1200 800 ;;
   center)
     # keep the current size, move to the middle of the work area
+    save_geometry
     read -r cw ch < <(hyprctl -j activewindow | jq -r '.size | @sh' | tr -d "'")
     x=$(( ax + (aw - cw) / 2 )); y=$(( ay + (ah - ch) / 2 ))
     hyprctl --batch "dispatch setfloating; dispatch moveactive exact $x $y" >/dev/null ;;
+  maximize-height)
+    # keep x and width, span the work area vertically
+    save_geometry
+    read -r cx cy cw ch < <(hyprctl -j activewindow | jq -r '[.at[0], .at[1], .size[0], .size[1]] | @sh' | tr -d "'")
+    hyprctl --batch "dispatch setfloating; dispatch resizeactive exact $cw $ah; dispatch moveactive exact $cx $ay" >/dev/null ;;
+  maximize-width)
+    save_geometry
+    read -r cx cy cw ch < <(hyprctl -j activewindow | jq -r '[.at[0], .at[1], .size[0], .size[1]] | @sh' | tr -d "'")
+    hyprctl --batch "dispatch setfloating; dispatch resizeactive exact $aw $ch; dispatch moveactive exact $ax $cy" >/dev/null ;;
   *) echo "wm.sh: unknown action $action" >&2; exit 1 ;;
 esac

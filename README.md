@@ -9,14 +9,44 @@ runs extensions from the Raycast Store.
 
 ## What it does
 
-**Root search** — applications, commands, quicklinks, snippets, script
-commands, open windows, extension commands, and every action of the stock
-Omarchy menu (with its breadcrumb) in one list. Ranking follows the stock
+**The default page** (empty search field) is four sections, Raycast's root
+with the Omarchy menu folded in:
+
+| Section | Rows |
+|---|---|
+| Favorites | The commands you pinned (`Ctrl+Shift+F`), in your order (`Ctrl+Shift+↑/↓`); hidden until you pin something; "Edit" in the header opens Preferences › Favorites |
+| Suggestions | Your most-used entries by frecency, at most 5 (fewer when favorites take the space, so the personal rows stay above the fold) |
+| Omarchy | The stock menu's root — Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About, System — with a preview of each submenu; `Enter` or `→` opens it as a nested list, `Backspace`/`←` comes back |
+| Commands | Everything else A–Z with a type label (Application, Command, System, Window, Quicklink, Snippet, Script, AI, or the extension's name); "Install Extensions…" and "Set Up AI…" rows appear here only until you have done so |
+
+**Root search** — typing collapses the page into one ranked list:
+applications, commands, quicklinks, snippets, script commands, open windows,
+extension commands, the Omarchy categories (`settings` → Setup, `uninstall` →
+Remove, `power-menu` → System, exactly like `omarchy menu summon`) and every
+action of the stock menu with its breadcrumb. Ranking follows the stock
 menu's rules (prefix › word-boundary › substring › acronym) plus aliases,
-favorites, and usage history (frecency). The empty field shows Suggestions
-from your recent use. Type an expression and the calculator answers inline
-(`2*(3+4)^2 to hex`, `15% of 80`, `10 km in mi`, `72f to c`); when nothing
-matches well, fallback quicklinks offer to search the web with what you typed.
+favorites, and usage history (frecency); `Ctrl+Shift+R` resets an entry's
+ranking, `Ctrl+Shift+D` disables it. Some things the typed text *is* get an
+inline row: an expression (`2*(3+4)^2 to hex`, `15% of 80`, `10 km in mi`,
+`72f to c`, `ans*2`), a URL or domain (`github.com/raycast` → Open in
+Browser), a colour (`#ff8000`, `rgb(255,128,0)`, `hsl(30,100%,50%)` → swatch
+with HEX/RGB/HSL/QML copies), a path (`~/Doc`, `/usr/sh` → files and folders
+there), and `alias text` runs a quicklink, script, or extension command that
+takes an argument with `text` filled in. When nothing matches well, the
+fallback commands (quicklinks with `{query}`, Ask AI, Search Files, Run Shell
+Command, Search Snippets, scripts with an argument; pick and order them from
+"Edit" on the fallback header or Preferences › Fallback Commands) offer to
+take the query.
+
+**Omarchy menu parity.** Every stock row is here: submenus hide when their
+`when:` guards leave nothing visible, `checked:` rows show a ✓ and stay open
+while they toggle, provider submenus (Style › Font, power profiles) enumerate
+live, typing inside a category ranks that level and adds an "Inside <Label>"
+section of everything beneath it, and `omarchy-shell io.github.hominluo.launcher
+menu settings` (or `launcher menu style.font`) opens a category by id or
+alias. The Apps category is the launcher's own browser (Recently Used, then
+A–Z) with Open / Copy Name / .desktop actions such as "New Private Window" /
+Hide / Uninstall (`Delete`) on every row.
 
 **Built-in commands** (all searchable; each can get an alias, a global hotkey,
 and a favorite flag from Preferences or the Ctrl+K action panel):
@@ -24,12 +54,12 @@ and a favorite flag from Preferences or the Ctrl+K action panel):
 | Command | What it does |
 |---|---|
 | Clipboard History | The shell's own clipboard history with a preview pane, pins, paste/copy/open/delete |
-| Search Snippets / Create Snippet | Text snippets with `{clipboard}` `{date}` `{time}` `{uuid}` `{cursor}` `{argument name="x"}` placeholders; paste or copy |
+| Search Snippets / Create Snippet | Text snippets with `{clipboard}` `{selection}` `{date}` `{time}` `{uuid}` `{cursor}` `{argument name="x"}` placeholders (arguments without a default are asked for in a form); paste or copy |
 | Search Quicklinks / Create Quicklink | URLs with a `{query}` placeholder (Google, GitHub, Arch Wiki, … seeded); also root fallbacks |
 | Search Emoji & Symbols | Grid of emoji plus common symbols and kaomoji; recents first |
-| Window management | Left/Right/Top/Bottom Half, Thirds, Quarters, Center, Maximize, Almost Maximize, Reasonable Size, Fullscreen, Tile, Float, Pin, Move to Display/Workspace, Scratchpad, Close, Close Others — as individual commands, so each can be bound |
+| Window management | Left/Right/Top/Bottom Half, Thirds, Quarters, Center, Maximize (also Height/Width only), Almost Maximize, Reasonable Size, Restore Previous Size, Move Up/Down/Left/Right, Fullscreen, Tile, Float, Pin, Move to Display, Move to Workspace 1–9 / Next / Previous, Switch to Next/Previous Workspace, Scratchpad (Minimize), Close, Close Others — as individual commands, so each can be bound |
 | Switch Windows | Focus, close, float, or pull any open window to the current workspace |
-| System | Lock, Sleep, Hibernate, Log Out, Restart, Shut Down, Screensaver, Trash, Night Light, Do Not Disturb, Stay Awake, Toggle Bar, volume/mute/mic, media keys, brightness, Wi-Fi, Bluetooth, theme and background switching, gaps/transparency toggles, Restart Shell, Update Omarchy, Text Size, Keybindings |
+| System | Lock, Sleep, Hibernate, Log Out, Restart, Shut Down, Screensaver, Trash, Show Desktop, Night Light, Do Not Disturb, Stay Awake, Toggle Bar, Crash Capture, Screensaver, Workspace Layout, 1-Window Ratio, Battery Percentage, Touchpad, Touchscreen, Laptop Display, Mirror Display, Hybrid GPU (each toggle shows a ✓ for its current state), volume up/down/mute/set to 0–100%, mic, media keys, brightness, Wi-Fi, Bluetooth, network and disk speed tests, theme and background switching, gaps/transparency toggles, Restart Shell, Update Omarchy, Text Size, Keybindings |
 | Kill Process | Live process table sorted by CPU or memory |
 | Search Files | `fd` over your home (skips FUSE mounts), preview pane, open / reveal / terminal / copy path / trash |
 | Run Shell Command | Enter runs in a floating terminal, Ctrl+Enter runs quietly and shows the output |
@@ -38,8 +68,9 @@ and a favorite flag from Preferences or the Ctrl+K action panel):
 | Set Reminder / Show Reminders | `omarchy reminder` with a form ("15", "1h", or "14:30") |
 | Pick Color / Color History | `hyprpicker`, then HEX/RGB/HSL/QML formats from a grid of swatches |
 | Take Screenshot / Screenshot Window / Full Screen, Capture Text (OCR), Scan QR Code, Record Screen | The Omarchy capture tools, reachable without a PRINT key |
-| Omarchy Menu | The stock menu tree, browsable, with its `when:`/`checked:` guards |
-| Launcher Preferences | Hotkey, per-command alias/hotkey/favorite/enable, file-search scope, calculator, extension preferences |
+| Omarchy Menu | The stock menu tree, browsable ("Go…"), with its `when:`/`checked:` guards, providers, and per-level search |
+| Favorites / Fallback Commands | Reorder or remove pinned rows; choose what a query is handed to when nothing matches |
+| Launcher Preferences | Hotkey, Default Page (sections, suggestion count, placeholder, search history), per-command alias/hotkey/favorite/enable, file-search scope, calculator, AI providers, extension preferences |
 
 **Raycast extensions.** `launcher ext install <owner/name>` downloads the
 prebuilt bundle straight from the Raycast Store (no Node toolchain needed for
@@ -49,17 +80,27 @@ view model the built-ins use: lists with sections, accessories and detail
 panes, grids, forms, detail pages with metadata, action panels with
 shortcuts, toasts, alerts, dropdown accessories, navigation, LocalStorage,
 Cache, preferences (with a form for required ones), Clipboard, `open`, OAuth
-(PKCE with the `raycast://` redirect), and Hyprland-backed WindowManagement.
+(PKCE with the `raycast://` redirect), Hyprland-backed WindowManagement,
+menu-bar commands (persistent sessions shown as bar buttons), and `AI.ask`
+through the configured provider. Commands that declare `arguments` prompt
+for them in a form, or take the text after their alias as the first one.
 Extensions that call AppleScript or ship macOS binaries are flagged at
-install time. Menu-bar commands and `AI.ask` are not wired up yet.
+install time.
 
 **Keyboard.** Raycast's ⌘ is Ctrl here. `↑`/`↓` or `Ctrl+P`/`Ctrl+N` move,
+`Ctrl+↑/↓` jump between sections, `Alt+1`…`Alt+9` run the n-th visible row,
 `Enter` primary action, `Ctrl+Enter` secondary, `Ctrl+K` action panel,
-`Tab` autocompletes the top result, `Ctrl+U` clears, `Esc`/`Backspace` go
-back, `Ctrl+,` preferences, `Ctrl+Shift+,` configure the selected command,
-`Ctrl+Shift+F` favorite, `Ctrl+Shift+C` copy, `Alt+↑/↓` cycle a dropdown
-accessory, `Ctrl+Enter` submits a form. Per-action shortcuts declared by
-extensions work with Ctrl in place of ⌘.
+`→` opens a menu row (or the selected row when the field is empty), `←`
+goes back, `Tab` autocompletes the selected row (a second `Tab` runs it),
+`↑` on the first row recalls earlier queries (`↓` walks forward, `Esc`
+restores what you typed), `Ctrl+U` clears, `Esc`/`Backspace` go back,
+`Ctrl+,` preferences, `Ctrl+Shift+,` configure the selected command,
+`Ctrl+Shift+F` favorite, `Ctrl+Shift+↑/↓` reorder favorites,
+`Ctrl+Shift+R` reset ranking, `Ctrl+Shift+D` disable, `Delete` uninstall an
+application, `Ctrl+Shift+C` copy, `Alt+↑/↓` cycle a dropdown accessory,
+`Ctrl+Enter` submits a form. Per-action shortcuts declared by extensions
+work with Ctrl in place of ⌘. The window holds exclusive keyboard focus, so
+these chords win over Hyprland binds while it is open.
 
 ## Install
 
@@ -119,6 +160,8 @@ omarchy-shell shell toggle io.github.hominluo.launcher              # toggle
 omarchy-shell shell toggle io.github.hominluo.launcher '{"query":"vol"}'
 omarchy-shell shell toggle io.github.hominluo.launcher '{"command":"clipboard"}'
 omarchy-shell io.github.hominluo.launcher run cmd:wm-left-half       # run a command by id
+omarchy-shell io.github.hominluo.launcher menu settings              # an Omarchy category by id or alias
+omarchy-shell shell toggle io.github.hominluo.launcher '{"menu":"style.font"}'
 omarchy-shell io.github.hominluo.launcher open "$(printf '%s' '{"query":"a,b"}' | base64 -w0)"
 omarchy-shell io.github.hominluo.launcher status
 ```
@@ -153,10 +196,10 @@ macOS-only.
 
 | Path | Purpose |
 |---|---|
-| `~/.config/omarchy-launcher/settings.json` | `hotkey`, per-command overrides (`commands`), `fileSearchRoots`, `fileSearchExcludes`, `fileSearchHidden`, `calculator.angle`, `scriptDirs` |
+| `~/.config/omarchy-launcher/settings.json` | `hotkey`, per-command overrides (`commands`), `favoritesOrder`, `fallbackCommands`, `favoritesSection.show`, `suggestionsSection.show`, `suggestionsCap`, `omarchySection.{show,apps}`, `commandsSection.{show,apps}`, `rootPlaceholder`, `searchHistory.enabled`, `fileSearchRoots`, `fileSearchExcludes`, `fileSearchHidden`, `calculator.angle`, `scriptDirs`, `menuBarCommands` |
 | `~/.config/omarchy-launcher/{snippets,quicklinks}.json` | Your snippets and quicklinks (edited by the launcher, hand-editable) |
 | `~/.config/omarchy-launcher/prefs/*.json` | Extension preferences (mode 0600) |
-| `~/.local/state/omarchy-launcher/` | Frecency, clipboard pins, notes, colors, focus state, emoji recents |
+| `~/.local/state/omarchy-launcher/` | Frecency, search history, clipboard pins, notes, colors, focus state, emoji recents |
 | `~/.local/share/omarchy-launcher/` | Installed extensions, their support data, OAuth tokens |
 
 All of them hot-reload; hand edits apply without restarting the shell.
@@ -189,6 +232,18 @@ built-ins, extension host), `Launcher.qml` owns the window, `ui/` holds the
 renderers, `builtins/` the commands, `lib/` the pure JS shared with the
 tests, `data/` the command catalogs and the Raycast-icon glyph map, `ext/`
 the sidecar bridge, `bin/` helper scripts.
+
+## Not there yet
+
+- The stock menu's dmenu-style `select`/`input` modes (`omarchy-menu-select`,
+  `omarchy-menu-input`) still open the stock menu; scripts call it directly.
+  The launcher will accept the same payload
+  (`{"mode":"select","prompt":…,"options":[…],"selectionFile":…,"doneFile":…}`)
+  once those scripts can be pointed at it.
+- Raycast's compact window mode, currency and date arithmetic in the
+  calculator, system-wide snippet expansion, Quick Look, and file content
+  search.
+- AI chat history, Skills, and MCP tools for the AI layer.
 
 ## Requirements
 

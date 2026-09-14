@@ -64,6 +64,12 @@ BuiltinHost {
   function buildView(loading) {
     var items = []
     for (var i = 0; i < host.results.length; i++) items.push(itemFor(host.results[i]))
+    var sections = []
+    if (host.query.length < 2) {
+      var recent = []
+      for (var r = 0; r < host.recentResults.length; r++) recent.push(itemFor(host.recentResults[r]))
+      if (recent.length) sections.push({ id: "recent", title: "Recently Modified", items: recent })
+    } else sections.push({ id: "results", title: "", items: items })
     return {
       id: "files",
       type: "list",
@@ -71,10 +77,10 @@ BuiltinHost {
       searchBarPlaceholder: "Search files and folders…",
       filtering: false,
       isShowingDetail: true,
-      isLoading: !!loading,
+      isLoading: !!loading || (host.query.length < 2 && recentFinder.running),
       searchText: host.query,
-      items: items,
-      emptyView: host.query.length < 2 ? { icon: "󰱽", title: "Type at least two characters" } : { icon: "󰱽", title: loading ? "Searching…" : "No files match “" + host.query + "”" }
+      sections: sections,
+      emptyView: host.query.length < 2 ? { icon: "󰱽", title: "Type to search files", description: "Paths starting with ~ or / browse that folder" } : { icon: "󰱽", title: loading ? "Searching…" : "No files match “" + host.query + "”" }
     }
   }
 
@@ -84,6 +90,7 @@ BuiltinHost {
     host.results = []
     host.push(buildView(false))
     if (host.query.length >= 2) debounce.restart()
+    else loadRecent()
   }
 
   function searchText(viewId, text) {
@@ -92,6 +99,88 @@ BuiltinHost {
     if (text.length < 2) { host.results = []; host.render(buildView(false)); return }
     host.render(buildView(true))
     debounce.restart()
+  }
+
+  // ---- files changed in the last week, newest first (the empty state)
+  property var recentResults: []
+  property double recentLoadedAt: 0
+  function loadRecent() {
+    if (recentFinder.running) return
+    if (Date.now() - host.recentLoadedAt < 60 * 1000 && host.recentResults.length) return
+    var ex = excludes()
+    var args = ["fd", "--type", "f", "--changed-within", "7d", "--one-file-system", "--max-results", "400", "--color", "never"]
+    for (var i = 0; i < ex.length; i++) args.push("--exclude", ex[i])
+    args.push("-0", ".")
+    var rs = roots()
+    for (var r = 0; r < rs.length; r++) args.push(rs[r])
+    var cmd = args.map(function(a) { return "'" + String(a).replace(/'/g, "'\\''") + "'" }).join(" ")
+    recentFinder.command = ["bash", "-c", cmd + " 2>/dev/null | xargs -0 -r stat -c '%Y %n' 2>/dev/null | sort -rn | head -20 | cut -d' ' -f2-"]
+    recentFinder.running = true
+  }
+  Process {
+    id: recentFinder
+    stdout: StdioCollector {
+      onStreamFinished: {
+        host.recentResults = String(text || "").split("\n").filter(function(l) { return l.length > 0 })
+        host.recentLoadedAt = Date.now()
+        if (host.activeViewId === "files" && host.query.length < 2) host.render(host.buildView(false))
+      }
+    }
+  }
+
+  // ---- root queries: "~/Doc" or "/usr/sh" typed at the root list files
+  // inline. The service re-renders the root when results land.
+  property string rootQuery: ""
+  property var rootResults: []
+  property bool rootPending: false
+  function rootRows(q) {
+    var query = String(q || "")
+    if (query !== host.rootQuery) {
+      host.rootQuery = query
+      host.rootResults = []
+      host.rootPending = true
+      rootDebounce.restart()
+    }
+    var out = []
+    for (var i = 0; i < host.rootResults.length && i < 12; i++) out.push(itemFor(host.rootResults[i]))
+    return out
+  }
+  Timer { id: rootDebounce; interval: 160; onTriggered: host.runRootSearch(host.rootQuery) }
+  function runRootSearch(q) {
+    host.rootSerial += 1
+    rootFinder.serial = host.rootSerial
+    var argv = ["fd", "--color", "never", "--max-results", "40", "--one-file-system"]
+    if (service && service.settings && service.settings.fileSearchHidden === true) argv.push("--hidden")
+    var ex = excludes()
+    for (var i = 0; i < ex.length; i++) argv.push("--exclude", ex[i])
+    var pattern = q
+    var searchRoots = roots()
+    var m = q.match(/^(~|\/)([^\s]*)$/)
+    if (m) {
+      var full = (m[1] === "~" ? host.home : "") + (m[1] === "~" ? m[2] : "/" + m[2])
+      var slash = full.lastIndexOf("/")
+      searchRoots = [full.slice(0, slash + 1) || "/"]
+      pattern = full.slice(slash + 1)
+      argv.push("--max-depth", "1")
+    }
+    argv.push("--", pattern.length ? pattern : ".")
+    for (var r = 0; r < searchRoots.length; r++) argv.push(searchRoots[r])
+    if (rootFinder.running) rootFinder.running = false
+    rootFinder.command = argv
+    rootFinder.running = true
+  }
+  property int rootSerial: 0
+  Process {
+    id: rootFinder
+    property int serial: 0
+    stdout: StdioCollector {
+      onStreamFinished: {
+        if (rootFinder.serial !== host.rootSerial) return
+        host.rootResults = String(text || "").split("\n").filter(function(l) { return l.length > 0 })
+        host.rootPending = false
+        if (service) service.indexChanged()
+      }
+    }
   }
 
   function search(q) {

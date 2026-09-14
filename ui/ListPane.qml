@@ -29,6 +29,10 @@ Item {
   signal activateRequested(string itemId)
   signal selectionChanged(string itemId)
   signal loadMoreRequested()
+  signal sectionAccessoryClicked(string sectionId)
+
+  // sectionTitle -> { sectionId, accessory } for the header delegate.
+  property var sectionMeta: ({})
 
   ListModel { id: rowModel }
 
@@ -54,6 +58,68 @@ Item {
     return VM.findItem(pane.view, rowModel.get(index).itemId)
   }
 
+  function sectionIdAt(index) {
+    if (index < 0 || index >= rowModel.count) return ""
+    return String(rowModel.get(index).sectionId || "")
+  }
+
+  function sectionTitleAt(index) {
+    if (index < 0 || index >= rowModel.count) return ""
+    return String(rowModel.get(index).sectionTitle || "")
+  }
+
+  function chevronAt(index) {
+    if (index < 0 || index >= rowModel.count) return false
+    return rowModel.get(index).chevron === "1"
+  }
+
+  // Move the cursor to the first row of the next (delta > 0) or previous
+  // section; wraps around. Sections are runs of equal sectionId.
+  function jumpSection(delta) {
+    var n = rowModel.count
+    if (n === 0) return
+    var cur = Math.max(0, Math.min(n - 1, pane.selectedIndex))
+    var curId = sectionIdAt(cur)
+    var target = -1
+    if (delta > 0) {
+      for (var i = cur + 1; i < n; i++) if (sectionIdAt(i) !== curId) { target = i; break }
+      if (target < 0) target = 0
+    } else {
+      // Start of the current section, unless already there: then the start
+      // of the previous one (wrapping to the last section's first row).
+      var start = cur
+      while (start > 0 && sectionIdAt(start - 1) === curId) start--
+      if (start < cur) target = start
+      else {
+        var j = start - 1
+        if (j < 0) j = n - 1
+        var prevId = sectionIdAt(j)
+        while (j > 0 && sectionIdAt(j - 1) === prevId) j--
+        target = j
+      }
+    }
+    pointerGate.reset()
+    pane.cursorActive = true
+    pane.selectedIndex = target
+    revealCursor()
+    pane.selectionChanged(selectedItemId())
+  }
+
+  // Index of the n-th (1-based) row at least half visible, or -1.
+  function visibleIndexAt(n) {
+    var count = 0
+    for (var i = 0; i < rowModel.count; i++) {
+      var item = list.itemAtIndex(i)
+      if (!item) continue
+      var top = item.y - list.contentY
+      var bottom = top + item.height
+      if (bottom - item.height / 2 < 0 || top + item.height / 2 > list.height) continue
+      count += 1
+      if (count === n) return i
+    }
+    return -1
+  }
+
   // Rebuild rows from the view. When the item sequence is unchanged, rows
   // are updated in place so delegates (and their images) survive.
   function sync() {
@@ -65,6 +131,12 @@ Item {
         if (rowModel.get(i).itemId !== rows[i].itemId) { same = false; break }
       }
     }
+    var meta = {}
+    for (var r = 0; r < rows.length; r++) {
+      var t = rows[r].sectionTitle
+      if (t.length && meta[t] === undefined) meta[t] = { sectionId: rows[r].sectionId, accessory: rows[r].sectionAccessory }
+    }
+    pane.sectionMeta = meta
     if (same) {
       for (var j = 0; j < rows.length; j++) rowModel.set(j, rows[j])
     } else {
@@ -148,7 +220,10 @@ Item {
     section.criteria: ViewSection.FullString
     section.labelPositioning: ViewSection.InlineLabels
     section.delegate: Item {
+      id: header
       required property string section
+      readonly property var meta: pane.sectionMeta[section] || null
+      readonly property string accessory: meta && meta.accessory ? String(meta.accessory) : ""
       width: ListView.view.width
       height: section.length > 0 ? pane.headerHeight : 0
       visible: section.length > 0
@@ -157,13 +232,40 @@ Item {
         anchors.leftMargin: Style.space(12)
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Style.space(5)
-        text: section
+        text: header.section
         color: pane.foreground
         opacity: 0.5
         font.family: pane.fontFamily
         font.pixelSize: Style.font.caption
         font.weight: Font.DemiBold
         textFormat: Text.PlainText
+      }
+      // Optional right-aligned header action ("Edit" on Favorites).
+      Item {
+        visible: header.accessory.length > 0
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(12)
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Style.space(3)
+        width: accessoryLabel.implicitWidth + Style.space(8)
+        height: accessoryLabel.implicitHeight + Style.space(4)
+        Text {
+          id: accessoryLabel
+          anchors.centerIn: parent
+          text: header.accessory
+          color: pane.foreground
+          opacity: accessoryMouse.containsMouse ? 0.85 : 0.5
+          font.family: pane.fontFamily
+          font.pixelSize: Style.font.caption
+          textFormat: Text.PlainText
+        }
+        MouseArea {
+          id: accessoryMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: pane.sectionAccessoryClicked(header.meta ? String(header.meta.sectionId) : "")
+        }
       }
     }
 

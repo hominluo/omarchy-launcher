@@ -55,7 +55,14 @@ PanelWindow {
   Connections {
     target: panel.service
     ignoreUnknownSignals: true
-    function onIndexChanged() { if (panel.opened && panel.atRoot && panel.service) stack.render(panel.service.rootView(searchBar.text)) }
+    function onIndexChanged() {
+      if (!panel.opened || !panel.atRoot || !panel.service) return
+      // Inline file results land after the first render; if the cursor still
+      // sits on the "Search Files" placeholder, move it to the best match.
+      var onPlaceholder = listPane.selectedItemId() === "files:open"
+      stack.render(panel.service.rootView(searchBar.text))
+      if (onPlaceholder && listPane.selectedIndex > 0 && listPane.cursorActive) listPane.jump(0)
+    }
     function onMenubarsChanged() {
       var v = stack.currentView
       if (panel.opened && v && String(v.id).indexOf("menubar:") === 0) stack.render(panel.service.menubarView(String(v.id).slice(8)))
@@ -89,6 +96,7 @@ PanelWindow {
     actionPanel.close()
     toast.hide()
     panel.confirmOpen = false
+    panel.leaveHistory(false)
     stack.reset()
     stack.push(panel.service ? panel.service.rootView(query) : { id: "root", type: "list", filtering: false, items: [] }, null)
     searchBar.reset(query)
@@ -103,6 +111,8 @@ PanelWindow {
         panel.showToast({ style: "failure", title: "Extension command not found", message: payload.extension + "/" + payload.command })
     } else if (payload && payload.command && panel.service && typeof panel.service.runCommandId === "function")
       panel.service.runCommandId(String(payload.command), panel, payload.arguments || {})
+    else if (payload && payload.menu !== undefined && panel.service && typeof panel.service.runCommandId === "function")
+      panel.service.runCommandId("cmd:omarchy-menu", panel, { menu: String(payload.menu || "root") })
   }
 
   function dismiss() {
@@ -116,6 +126,7 @@ PanelWindow {
   function onSearchEdited(text) {
     var frame = stack.current
     if (!frame) return
+    if (panel.historyMode && text !== panel.historyShown) panel.leaveHistory(false)
     if (!frame.owner) {
       stack.render(panel.service ? panel.service.rootView(text) : frame.view)
       listPane.selectedIndex = 0
@@ -239,9 +250,17 @@ PanelWindow {
 
   function actionsFor(item) {
     if (!item) return null
-    if (panel.atRoot && panel.service && item.data && item.data.entryId !== undefined) {
+    // Rows that stand for an index entry (root, Apps browser, Favorites…)
+    // share the entry's action panel wherever they appear.
+    if (panel.service && item.data && item.data.entryId !== undefined && !(item.actions && item.actions.sections.length)) {
       var entry = panel.service.entryById(item.data.entryId)
-      return entry ? VM.normalizeActions(panel.service.entryActions(entry)) : null
+      if (entry) return VM.normalizeActions(panel.service.entryActions(entry))
+    }
+    if (panel.service && item.data && item.data.placeholder) {
+      var page = String(item.data.placeholder)
+      return VM.normalizeActions({ sections: [{ actions: [
+        { id: "open", title: "Open Preferences", icon: "󰢻", run: function() { panel.service.runCommandId("cmd:preferences", panel, { page: page }); return true } }
+      ] }] })
     }
     if (item.actions && item.actions.sections.length) return item.actions
     return stack.currentView ? stack.currentView.actions : null
@@ -400,7 +419,46 @@ PanelWindow {
     var item = panel.selectedItem()
     if (!item) return
     if (panel.formView && formPane.hasErrors()) { panel.showToast({ style: "failure", title: "Fix the highlighted fields first" }); return }
+    if (panel.atRoot && panel.service && typeof panel.service.recordSearch === "function" && searchBar.text.trim().length) panel.service.recordSearch(searchBar.text)
+    if (panel.historyMode) panel.leaveHistory(false)
     panel.runAction(panel.actionAt(item, level), item)
+  }
+
+  // ---- search history: ↑ on the first row recalls earlier root queries
+  property bool historyMode: false
+  property int historyPos: -1
+  property string historyLive: ""
+  property string historyShown: ""
+  function historyList() {
+    if (!panel.service || typeof panel.service.searchHistory !== "function") return []
+    var s = panel.service.settings
+    if (s && s.searchHistory && s.searchHistory.enabled === false) return []
+    return panel.service.searchHistory() || []
+  }
+  function showHistory(pos) {
+    var h = panel.historyList()
+    if (pos < 0 || pos >= h.length) return false
+    if (!panel.historyMode) { panel.historyLive = searchBar.text; panel.historyMode = true }
+    panel.historyPos = pos
+    panel.historyShown = String(h[pos])
+    panel.setSearchText(panel.historyShown)
+    return true
+  }
+  function leaveHistory(restore) {
+    if (!panel.historyMode) return
+    var live = panel.historyLive
+    panel.historyMode = false
+    panel.historyPos = -1
+    panel.historyShown = ""
+    panel.historyLive = ""
+    if (restore) panel.setSearchText(live)
+  }
+
+  // Selected root entry (if the cursor row stands for one).
+  function selectedEntry() {
+    var item = panel.selectedItem()
+    if (!item || !item.data || item.data.entryId === undefined || !panel.service) return null
+    return panel.service.entryById(item.data.entryId)
   }
 
   function toggleActions() {
@@ -419,12 +477,25 @@ PanelWindow {
   }
 
   function escapePressed() {
+    if (panel.historyMode) { panel.leaveHistory(true); return }
     if (!panel.atRoot) { panel.popView(); return }
     panel.dismiss()
   }
 
   // Every key press reaches here first (see SearchBar). Return true to
   // swallow the key; anything else falls through to the text field.
+  //
+  // Ordering matters:
+  //   1. modal surfaces (confirm dialog, action panel) eat everything;
+  //   2. Esc / ⌃K / ⌃T;
+  //   3. navigation chords that share modifiers with per-action shortcuts
+  //      (⌃↑/↓ section jump, ⌃⇧↑/↓ favorite reorder, ⌥1–9, ⌃⇧R, ⌃⇧D) — these
+  //      must come BEFORE the generic (ctrl||alt) shortcut matcher or an
+  //      item action with the same chord would eat them;
+  //   4. the generic per-action shortcut matcher;
+  //   5. form/detail routing;
+  //   6. plain list keys (↑/↓ come after history recall and →/← after the
+  //      grid's own horizontal moves).
   function handleKey(event) {
     if (panel.confirmOpen) return confirmDialog.handleKey(event)
     if (actionPanel.opened) return actionPanel.handleKey(event)
@@ -433,10 +504,40 @@ PanelWindow {
     var shift = (event.modifiers & Qt.ShiftModifier) !== 0
     var alt = (event.modifiers & Qt.AltModifier) !== 0
     var key = event.key
+    var listView = panel.viewType === "list"
 
     if (key === Qt.Key_Escape) { panel.escapePressed(); return true }
     if (ctrl && key === Qt.Key_K) { panel.toggleActions(); return true }
     if (ctrl && key === Qt.Key_T && panel.toastPrimaryAction && typeof panel.toastPrimaryAction.run === "function") { panel.toastPrimaryAction.run(); return true }
+
+    // 3. navigation chords (before the generic matcher)
+    if (listView && ctrl && !shift && !alt && (key === Qt.Key_Down || key === Qt.Key_Up)) { listPane.jumpSection(key === Qt.Key_Down ? 1 : -1); return true }
+    if (listView && panel.atRoot && ctrl && shift && !alt && (key === Qt.Key_Down || key === Qt.Key_Up)) {
+      var favEntry = panel.selectedEntry()
+      if (favEntry && favEntry.favorite && typeof panel.service.moveFavorite === "function") {
+        if (panel.service.moveFavorite(favEntry.id, key === Qt.Key_Up ? -1 : 1)) {
+          panel.onSearchEdited(searchBar.text)
+          for (var fi = 0; fi < listPane.count; fi++) if (listPane.itemAt(fi) && listPane.itemAt(fi).id === favEntry.id) { listPane.jump(fi); break }
+        }
+        return true
+      }
+    }
+    if (listView && alt && !ctrl && key >= Qt.Key_1 && key <= Qt.Key_9) {
+      var nth = listPane.visibleIndexAt(key - Qt.Key_1 + 1)
+      if (nth >= 0) { listPane.jump(nth); panel.activate(0) }
+      return true
+    }
+    if (ctrl && shift && key === Qt.Key_R) {
+      var rEntry = panel.selectedEntry()
+      if (rEntry && typeof panel.service.resetRanking === "function") { panel.service.resetRanking(rEntry.id, panel); return true }
+    }
+    if (ctrl && shift && key === Qt.Key_D) {
+      var dEntry = panel.selectedEntry()
+      // Categories are a fixed strip (no "disable" in their action panel either).
+      if (dEntry && dEntry.kind !== "omarchy-category" && typeof panel.service.disableEntry === "function") { panel.service.disableEntry(dEntry.id, panel); return true }
+    }
+
+    // 4. per-action shortcuts
     if ((ctrl || alt) && !(key === Qt.Key_Return || key === Qt.Key_Enter) && !(ctrl && key === Qt.Key_U) && !(ctrl && (key === Qt.Key_N || key === Qt.Key_P || key === Qt.Key_J))) {
       var sel = panel.selectedItem()
       var matched = sel ? panel.matchShortcut(event, sel) : null
@@ -456,10 +557,36 @@ PanelWindow {
       return false
     }
     var pane = panel.activePane
+
+    // 6. history recall: ↑ on the first row walks back through earlier
+    //    queries, ↓ walks forward and past the newest restores the live text.
+    if (listView && panel.atRoot && !ctrl && !alt && !shift) {
+      if (key === Qt.Key_Up && (panel.historyMode || ((listPane.selectedIndex === 0 || listPane.count === 0) && listPane.cursorActive))) {
+        if (panel.showHistory(panel.historyMode ? panel.historyPos + 1 : 0)) return true
+        if (panel.historyMode) return true
+      }
+      if (key === Qt.Key_Down && panel.historyMode) {
+        if (panel.historyPos > 0) panel.showHistory(panel.historyPos - 1)
+        else panel.leaveHistory(true)
+        return true
+      }
+    }
+
     if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N) || (ctrl && key === Qt.Key_J)) { pane.move(1); return true }
     if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) { pane.move(-1); return true }
     if (panel.viewType === "grid" && key === Qt.Key_Right && searchBar.cursorAtEnd()) { gridPane.moveHorizontal(1); return true }
     if (panel.viewType === "grid" && key === Qt.Key_Left && searchBar.cursorAtStart()) { gridPane.moveHorizontal(-1); return true }
+    // → opens a menu row (or anything when the bar is empty); ← pops a pushed view.
+    if (listView && key === Qt.Key_Right && !ctrl && !alt && searchBar.cursorAtEnd() && (searchBar.text.length === 0 || listPane.chevronAt(listPane.selectedIndex))) { panel.activate(0); return true }
+    if (listView && key === Qt.Key_Left && !ctrl && !alt && !panel.atRoot && searchBar.text.length === 0 && searchBar.cursorAtStart()) { panel.popView(); return true }
+    if (listView && key === Qt.Key_Delete && !ctrl && !alt && searchBar.text.length === 0) {
+      var delEntry = panel.selectedEntry()
+      if (delEntry && delEntry.kind === "app") {
+        var spec = panel.actionsFor(panel.selectedItem())
+        for (var si = 0; spec && si < spec.sections.length; si++) for (var sj = 0; sj < spec.sections[si].actions.length; sj++)
+          if (spec.sections[si].actions[sj].id === "uninstall") { panel.runAction(spec.sections[si].actions[sj], panel.selectedItem()); return true }
+      }
+    }
     if (key === Qt.Key_PageDown) { pane.page(1); return true }
     if (key === Qt.Key_PageUp) { pane.page(-1); return true }
     if (key === Qt.Key_Home && ctrl) { pane.jump(0); return true }
@@ -468,7 +595,12 @@ PanelWindow {
     if (ctrl && key === Qt.Key_U) { panel.setSearchText(""); return true }
     if (alt && (key === Qt.Key_Down || key === Qt.Key_Up) && stack.currentView && stack.currentView.searchBarAccessory) { panel.cycleAccessory(key === Qt.Key_Down ? 1 : -1); return true }
     if (key === Qt.Key_Backspace && !ctrl && !alt && searchBar.text.length === 0) { if (!panel.atRoot) panel.popView(); return true }
-    if (key === Qt.Key_Tab && !ctrl) { panel.autocomplete(); return true }
+    if (key === Qt.Key_Tab && !ctrl) {
+      var tabItem = panel.activePane.selectedItem()
+      if (tabItem && tabItem.title && searchBar.text === tabItem.title) panel.activate(0)
+      else panel.autocomplete()
+      return true
+    }
     if (ctrl && key === Qt.Key_R) { if (panel.atRoot) panel.onSearchEdited(searchBar.text); return true }
     if (ctrl && key === Qt.Key_Comma && panel.service) {
       if (shift && panel.atRoot) { var sel = pane.selectedItem(); if (sel && sel.data && sel.data.entryId !== undefined) panel.service.runCommandId("cmd:preferences", panel, { entryId: sel.data.entryId }) }
@@ -481,8 +613,8 @@ PanelWindow {
       return true
     }
     if (ctrl && shift && key === Qt.Key_F && panel.atRoot) {
-      var fav = pane.selectedItem()
-      if (fav && panel.service) panel.service.toggleFavorite(fav.data ? fav.data.entryId : "", panel)
+      var favTarget = panel.selectedEntry()
+      if (favTarget && panel.service && !(favTarget.kind === "omarchy-category" && favTarget.accessoryIcon === "›")) panel.service.toggleFavorite(favTarget.id, panel)
       return true
     }
     return false
@@ -574,6 +706,11 @@ PanelWindow {
         onActivateRequested: panel.activate(0)
         onSelectionChanged: function(itemId) { panel.notifySelection(itemId) }
         onLoadMoreRequested: panel.notifyLoadMore()
+        onSectionAccessoryClicked: function(sectionId) {
+          if (!panel.service) return
+          if (sectionId === "favorites") panel.service.runCommandId("cmd:preferences", panel, { page: "favorites" })
+          else if (sectionId === "fallback" && panel.service.handlers && panel.service.handlers.fallbacks) panel.service.handlers.fallbacks.open(panel, {})
+        }
       }
 
       GridPane {
@@ -674,6 +811,13 @@ PanelWindow {
       foreground: panel.foreground
       fontFamily: panel.fontFamily
       title: stack.currentView && stack.currentView.navigationTitle ? stack.currentView.navigationTitle : "Launcher"
+      hint: {
+        var _i = listPane.selectedIndex
+        var _c = listPane.count
+        if (panel.historyMode) return "↑↓ history · esc"
+        if (panel.viewType === "list" && listPane.sectionIdAt(listPane.selectedIndex) === "favorites") return "⌃⇧↑↓ reorder"
+        return ""
+      }
       leadingVisible: !toast.shown
       primaryVisible: panel.formView || panel.detailView || !panel.activePane.empty
       primaryTitle: {

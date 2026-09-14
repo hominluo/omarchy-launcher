@@ -7,6 +7,7 @@ import qs.Commons
 //   glyph -> Nerd Font glyph
 //   emoji -> emoji text
 //   image -> any Image source
+//   swatch -> a colour square (value is a CSS colour)
 Item {
   id: root
   property string kind: ""
@@ -22,6 +23,7 @@ Item {
   property string tint: ""
   property string mask: ""
   readonly property bool isImage: kind === "app" || kind === "image"
+  readonly property bool isSwatch: kind === "swatch"
   readonly property string glyphText: kind === "raycast-icon" ? (root.iconResolver && typeof root.iconResolver.raycastGlyph === "function" ? root.iconResolver.raycastGlyph(root.value) : "󰘔") : root.value
 
   Image {
@@ -42,9 +44,21 @@ Item {
     }
   }
 
+  // swatch -> a filled rounded square in the given colour (inline colour rows)
+  Rectangle {
+    anchors.centerIn: parent
+    visible: root.isSwatch
+    width: root.size * 0.82
+    height: root.size * 0.82
+    radius: Math.min(Style.cornerRadius, root.size * 0.25)
+    color: root.isSwatch && root.value ? root.value : "transparent"
+    border.width: 1
+    border.color: Util.alpha(root.foreground, 0.25)
+  }
+
   Text {
     anchors.centerIn: parent
-    visible: !root.isImage
+    visible: !root.isImage && !root.isSwatch
     text: root.glyphText
     color: root.tint ? root.tint : root.foreground
     font.family: root.kind === "emoji" ? "Noto Color Emoji" : root.fontFamily

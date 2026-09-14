@@ -31,7 +31,7 @@ BuiltinHost {
         favorite: false,
         primaryTitle: "Paste",
         snippet: s,
-        run: function(e) { host.pasteSnippet(e.snippet) }
+        run: function(e, win) { host.panel = win; return host.pasteSnippet(e.snippet) }
       })
     }
     return out
@@ -42,24 +42,60 @@ BuiltinHost {
     return t.length > 80 ? t.slice(0, 80) + "…" : t
   }
 
+  property string selectionText: ""
+
   function expanded(s, args) {
-    return Expand.expand(s.text, { clipboard: host.clipboardText, args: args || {} })
+    return Expand.expand(s.text, { clipboard: host.clipboardText, selection: host.selectionText, args: args || {} })
+  }
+
+  // {argument} placeholders without a default are asked for in a form
+  // before the paste; {selection} reads the primary selection first.
+  // Returns true when a form was pushed (the caller keeps the launcher open).
+  function withArguments(s, then) {
+    var specs = Expand.argumentSpecs(s.text)
+    var missing = specs.filter(function(a) { return !a["default"] })
+    if (!missing.length || !service || !host.panel) { then({}); return false }
+    var defs = missing.map(function(a) { return { name: a.name, placeholder: a.name, type: "text", required: true } })
+    service.promptArguments(host.panel, s.name || "Snippet", defs, then)
+    return true
   }
 
   function pasteSnippet(s) {
-    var r = expanded(s)
-    if (host.panel) host.panel.dismiss()
-    var script = service.pluginDir + "/bin/paste.sh"
-    Quickshell.execDetached(["bash", "-c",
-      "bash " + JSON.stringify(script) + " \"$1\"; n=$2; if (( n > 0 )); then sleep 0.05; for ((i=0;i<n;i++)); do wtype -k Left; done; fi",
-      "--", r.text, String(r.cursor >= 0 ? r.text.length - r.cursor : 0)])
+    var self = host
+    return withArguments(s, function(args) {
+      var go = function() {
+        var r = self.expanded(s, args)
+        if (self.panel) self.panel.dismiss()
+        var script = service.pluginDir + "/bin/paste.sh"
+        Quickshell.execDetached(["bash", "-c",
+          "bash " + JSON.stringify(script) + " \"$1\"; n=$2; if (( n > 0 )); then sleep 0.05; for ((i=0;i<n;i++)); do wtype -k Left; done; fi",
+          "--", r.text, String(r.cursor >= 0 ? r.text.length - r.cursor : 0)])
+      }
+      if (Expand.usesSelection(s.text)) self.readSelection(go); else go()
+    })
   }
 
   function copySnippet(s) {
-    Quickshell.execDetached(["wl-copy", "--", expanded(s).text])
+    var self = host
+    return withArguments(s, function(args) {
+      var go = function() { Quickshell.execDetached(["wl-copy", "--", self.expanded(s, args).text]) }
+      if (Expand.usesSelection(s.text)) self.readSelection(go); else go()
+    })
   }
 
-  function buildView() {
+  property var selectionCallback: null
+  function readSelection(then) {
+    host.selectionCallback = then
+    if (selectionProbe.running) return
+    selectionProbe.running = true
+  }
+  Process {
+    id: selectionProbe
+    command: ["bash", "-c", "wl-paste --primary --no-newline --type text 2>/dev/null || true"]
+    stdout: StdioCollector { onStreamFinished: { host.selectionText = String(text || ""); var cb = host.selectionCallback; host.selectionCallback = null; if (typeof cb === "function") cb() } }
+  }
+
+  function buildView(query) {
     var items = []
     for (var i = 0; i < host.snippets.length; i++) {
       var s = host.snippets[i]
@@ -73,8 +109,8 @@ BuiltinHost {
         detail: { markdown: "```\n" + String(s.text || "") + "\n```", metadata: s.keyword ? [{ kind: "label", title: "Keyword", text: s.keyword }] : [] },
         data: { snippet: s },
         actions: { sections: [ { actions: [
-          { id: "paste", title: "Paste", icon: "󰆒", run: function(item) { self.pasteSnippet(item.data.snippet); return false } },
-          { id: "copy", title: "Copy to Clipboard", icon: "󰆏", run: function(item) { self.copySnippet(item.data.snippet); return false } }
+          { id: "paste", title: "Paste", icon: "󰆒", run: function(item) { return self.pasteSnippet(item.data.snippet) } },
+          { id: "copy", title: "Copy to Clipboard", icon: "󰆏", run: function(item) { return self.copySnippet(item.data.snippet) } }
         ] }, { actions: [
           { id: "edit", title: "Edit Snippet", icon: "󰲶", shortcut: { modifiers: ["ctrl"], key: "e", label: "⌃E" }, run: function(item) { self.editSnippet(item.data.snippet); return true } },
           { id: "create", title: "Create Snippet", icon: "󰐕", shortcut: { modifiers: ["ctrl"], key: "n", label: "⌃N" }, run: function() { self.editing = null; self.push(self.formView(null, {})); return true } },
@@ -88,6 +124,7 @@ BuiltinHost {
       type: "list",
       navigationTitle: "Snippets",
       searchBarPlaceholder: "Search snippets…",
+      searchText: query || "",
       filtering: true,
       isShowingDetail: true,
       items: items,
@@ -106,7 +143,7 @@ BuiltinHost {
     host.panel = win
     clipboardProbe.running = true
     if (args && args.mode === "create") { host.push(formView(null, {})); return }
-    host.push(buildView())
+    host.push(buildView(args && args.query ? String(args.query) : ""))
   }
 
   // ---- create / edit
