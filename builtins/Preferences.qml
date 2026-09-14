@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "../lib/Files.js" as Files
 
 // Launcher Preferences: general settings, per-command configuration
 // (enable, alias, hotkey, favorite), file search scope, calculator.
@@ -243,7 +244,7 @@ BuiltinHost {
       id: "prefs-files", type: "form", navigationTitle: "File Search",
       fields: [
         { id: "roots", field: "textarea", title: "Search in", value: (s.fileSearchRoots || ["~"]).join("\n"), info: "One folder per line. ~ is your home." },
-        { id: "excludes", field: "textarea", title: "Exclude", value: (s.fileSearchExcludes || [".git", "node_modules", ".cache", "__pycache__", ".local/share/Trash"]).join("\n"), info: "Folder names or globs, one per line." },
+        { id: "excludes", field: "textarea", title: "Exclude", value: (s.fileSearchExcludes || Files.defaultExcludes()).join("\n"), info: "Folder names or globs, one per line (toolchains, caches and SDK sources are skipped by default)." },
         { id: "hidden", field: "checkbox", title: "Hidden files", label: "Include dotfiles and dot-folders", value: s.fileSearchHidden === true }
       ],
       actions: { actions: [ { id: "save", title: "Save", kind: "submitForm" }, { id: "cancel", title: "Cancel", kind: "pop" } ] }

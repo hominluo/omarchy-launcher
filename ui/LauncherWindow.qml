@@ -57,11 +57,12 @@ PanelWindow {
     ignoreUnknownSignals: true
     function onIndexChanged() {
       if (!panel.opened || !panel.atRoot || !panel.service) return
-      // Inline file results land after the first render; if the cursor still
-      // sits on the "Search Files" placeholder, move it to the best match.
-      var onPlaceholder = listPane.selectedItemId() === "files:open"
+      // Async rows (file results, guard answers) land after the first render.
+      // A cursor that was still on the top row follows the new top row; one
+      // the user moved stays on its item.
+      var atTop = listPane.selectedIndex === 0 && listPane.cursorActive
       stack.render(panel.service.rootView(searchBar.text))
-      if (onPlaceholder && listPane.selectedIndex > 0 && listPane.cursorActive) listPane.jump(0)
+      if (atTop && listPane.selectedIndex > 0) listPane.jump(0)
     }
     function onMenubarsChanged() {
       var v = stack.currentView

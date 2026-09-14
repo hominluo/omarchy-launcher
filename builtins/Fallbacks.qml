@@ -52,6 +52,7 @@ BuiltinHost {
     if (ai && ai.available) out.push("cmd:ai-ask")
     var entries = service ? service.entries : []
     for (var i = 0; i < entries.length; i++) if (entries[i].kind === "quicklink" && entries[i].link && entries[i].link.fallback && typeof entries[i].runWithArgument === "function") out.push(entries[i].id)
+    out.push("cmd:files")
     return out
   }
 

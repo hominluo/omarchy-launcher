@@ -142,6 +142,15 @@ BorderSurface {
       opacity: row.accessoryColor ? 1 : 0.7
     }
 
+    // Measured separately so the label's width never feeds back into its
+    // own layout (a Text whose width depends on its own metrics loops).
+    TextMetrics {
+      id: trailingMetrics
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      text: row.accessoryText
+    }
+
     Text {
       id: trailing
       anchors.verticalCenter: parent.verticalCenter
@@ -152,9 +161,7 @@ BorderSurface {
       font.family: row.fontFamily
       font.pixelSize: Style.font.bodySmall
       textFormat: Text.PlainText
-      // implicitWidth is the natural (unwrapped, unelided) width, so it does
-      // not depend on `width` and cannot loop.
-      width: visible ? Math.min(implicitWidth, row.width * 0.3) : 0
+      width: visible ? Math.ceil(Math.min(trailingMetrics.advanceWidth, row.width * 0.3)) : 0
       clip: true
       horizontalAlignment: Text.AlignRight
     }

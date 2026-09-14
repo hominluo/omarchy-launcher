@@ -32,11 +32,12 @@ inline row: an expression (`2*(3+4)^2 to hex`, `15% of 80`, `10 km in mi`,
 Browser), a colour (`#ff8000`, `rgb(255,128,0)`, `hsl(30,100%,50%)` → swatch
 with HEX/RGB/HSL/QML copies), a path (`~/Doc`, `/usr/sh` → files and folders
 there), and `alias text` runs a quicklink, script, or extension command that
-takes an argument with `text` filled in. When nothing matches well, the
-fallback commands (quicklinks with `{query}`, Ask AI, Search Files, Run Shell
-Command, Search Snippets, scripts with an argument; pick and order them from
-"Edit" on the fallback header or Preferences › Fallback Commands) offer to
-take the query.
+takes an argument with `text` filled in. When nothing matches well, a
+"Files" section shows the best-ranked files for the words you typed and the
+fallback commands (quicklinks with `{query}`, Search Files, Ask AI, Run
+Shell Command, Search Snippets, scripts with an argument; pick and order
+them from "Edit" on the fallback header or Preferences › Fallback Commands)
+offer to take the query.
 
 **Omarchy menu parity.** Every stock row is here: submenus hide when their
 `when:` guards leave nothing visible, `checked:` rows show a ✓ and stay open
@@ -61,7 +62,7 @@ and a favorite flag from Preferences or the Ctrl+K action panel):
 | Switch Windows | Focus, close, float, or pull any open window to the current workspace |
 | System | Lock, Sleep, Hibernate, Log Out, Restart, Shut Down, Screensaver, Trash, Show Desktop, Night Light, Do Not Disturb, Stay Awake, Toggle Bar, Crash Capture, Screensaver, Workspace Layout, 1-Window Ratio, Battery Percentage, Touchpad, Touchscreen, Laptop Display, Mirror Display, Hybrid GPU (each toggle shows a ✓ for its current state), volume up/down/mute/set to 0–100%, mic, media keys, brightness, Wi-Fi, Bluetooth, network and disk speed tests, theme and background switching, gaps/transparency toggles, Restart Shell, Update Omarchy, Text Size, Keybindings |
 | Kill Process | Live process table sorted by CPU or memory |
-| Search Files | `fd` over your home (skips FUSE mounts), preview pane, open / reveal / terminal / copy path / trash |
+| Search Files / Search File Contents | `fd` over your home ranked for relevance (exact and prefix names first, project folders over toolchain and SDK noise, recent files up), size and modification time in the preview, a names / contents switch (`Alt+↓`) that runs `ripgrep` and shows the matching lines, "Recently Modified" when the field is empty; open / reveal / terminal / editor / copy path / copy file / trash |
 | Run Shell Command | Enter runs in a floating terminal, Ctrl+Enter runs quietly and shows the output |
 | Floating Notes / Search Notes / New Note | An always-on-top Markdown notepad that outlives the launcher; notes are files under the state dir |
 | Start/Stop Focus Session | Countdown with optional Do Not Disturb, a bar countdown, and a notification at the end |
@@ -241,8 +242,7 @@ the sidecar bridge, `bin/` helper scripts.
   (`{"mode":"select","prompt":…,"options":[…],"selectionFile":…,"doneFile":…}`)
   once those scripts can be pointed at it.
 - Raycast's compact window mode, currency and date arithmetic in the
-  calculator, system-wide snippet expansion, Quick Look, and file content
-  search.
+  calculator, system-wide snippet expansion, and Quick Look.
 - AI chat history, Skills, and MCP tools for the AI layer.
 
 ## Requirements

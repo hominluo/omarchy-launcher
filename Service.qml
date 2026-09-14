@@ -452,6 +452,12 @@ Item {
       if (rows.length) sections.push({ id: "results", title: inline.length ? "Results" : "", items: rows })
       var strong = ranked.length && ranked[0].score >= 9000
       if (!strong || rows.length < 3) {
+        // Spotlight-style: a few ranked files when the index has little to say.
+        if (q.length >= 3) {
+          var frows = filesBuiltin.rootRows(q, 5)
+          if (frows.length) sections.push({ id: "files", title: "Files", items: frows })
+          loading = loading || filesBuiltin.rootPending
+        }
         var fb = fallbacksBuiltin.items(q)
         if (fb.length) sections.push({ id: "fallback", title: rows.length ? "Use “" + q + "” with…" : "", accessory: { text: "Edit" }, items: fb })
       }

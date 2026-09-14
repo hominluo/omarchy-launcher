@@ -112,10 +112,15 @@
       "file",
       "find",
       "folder",
-      "directory"
+      "directory",
+      "locate",
+      "fd",
+      "content",
+      "grep"
     ],
     "icon": "󰱽",
-    "handler": "files"
+    "handler": "files",
+    "subtitle": "Names, or contents with Alt+↓"
   },
   {
     "id": "shell",
@@ -436,6 +441,25 @@
     "handler": "preferences",
     "args": {
       "page": "favorites"
+    },
+    "primaryTitle": "Open"
+  },
+  {
+    "id": "files-content",
+    "title": "Search File Contents",
+    "subtitle": "ripgrep over your files",
+    "icon": "󰈞",
+    "keywords": [
+      "grep",
+      "rg",
+      "content",
+      "text",
+      "inside",
+      "find in files"
+    ],
+    "handler": "files",
+    "args": {
+      "mode": "content"
     },
     "primaryTitle": "Open"
   }
