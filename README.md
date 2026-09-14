@@ -361,7 +361,8 @@ omarchy restart shell         # after changes to Service.qml, builtins/ or data/
 
 The extension runtime and the CLI are TypeScript under `packages/`; their
 bundles in `runtime/` are committed because the plugin installer never runs
-code. Rebuild with `npm run build` in `packages/ext-host` and `packages/cli`
+code (`ext-host.js` is the launcher's own code, unminified; `vendor.js` is
+React, react-reconciler and scheduler, minified; `cli.js` the CLI). Rebuild with `npm run build` in `packages/ext-host` and `packages/cli`
 (dependencies install with `bin-links=false` so the plugin folder stays free
 of symlinks, which the validator forbids). `packages/ext-host/test/harness.js
 <extensionDir> <command>` drives the sidecar without the shell. A hidden
