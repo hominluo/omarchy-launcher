@@ -413,15 +413,17 @@ BuiltinHost {
     if (viewId === host.activeViewId) host.activeViewId = ""
   }
 
+  // args: { menu: "<id|alias>", query: "<text typed into that level>" }
   function open(win, args) {
     host.panel = win
     var target = "root"
     if (args && args.menu) {
       var name = String(args.menu)
       target = Menu.resolveAlias(host.items, host.order, name) || name
-      if (target === "apps") { host.openApps(); return }
+      if (target === "apps") { host.openApps(); if (args.query && win) win.setSearchText(String(args.query)); return }
     }
     host.enter(target)
+    if (args && args.query && win) win.setSearchText(String(args.query))
   }
 
   // ------------------------------------------------------------- apps browser

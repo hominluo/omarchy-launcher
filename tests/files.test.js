@@ -3,7 +3,6 @@ const assert = require("node:assert/strict")
 const F = require("../lib/Files.js")
 
 const NOW = 1_800_000_000
-const NUL = String.fromCharCode(0)
 const cand = (path, extra) => Object.assign({ path, isDir: false, mtime: NOW - 90 * 86400, size: 10 }, extra || {})
 
 test("exact and prefix name matches beat deep substring hits", () => {
@@ -46,10 +45,12 @@ test("parseStat reads mtime/size/type and strips directory slashes", () => {
 })
 
 test("content hits group by path with up to three lines", () => {
-  const out = ["/home/u/a.md" + NUL + "3:hello world", "/home/u/a.md" + NUL + "10:  hello again", "/home/u/b.txt" + NUL + "1:hello",
-    "/home/u/a.md" + NUL + "11:x", "/home/u/a.md" + NUL + "12:y", ""].join("\n")
+  const out = ["/home/u/a.md:3:hello world", "/home/u/a.md:10:  hello again", "/home/u/b.txt:1:hello",
+    "/home/u/a.md:11:x", "/home/u/a.md:12:y", "/home/u/c:d.txt:2:colon in name", ""].join("\n")
   const hits = F.parseContentHits(out)
-  assert.equal(hits.length, 2)
+  assert.equal(hits.length, 3)
+  assert.equal(hits[2].path, "/home/u/c:d.txt")
+  assert.equal(hits[2].hits[0].line, 2)
   assert.equal(hits[0].path, "/home/u/a.md")
   assert.equal(hits[0].hits.length, 3)
   assert.equal(hits[0].hits[1].text, "hello again")

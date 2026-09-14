@@ -93,7 +93,8 @@ PanelWindow {
     if (monitor && monitor.screen) panel.screen = monitor.screen
     if (panel.service && typeof panel.service.onWindowOpened === "function") panel.service.onWindowOpened()
 
-    var query = payload && payload.query ? String(payload.query) : ""
+    // A query travels with the menu payload into that level, not the root.
+    var query = payload && payload.query && payload.menu === undefined ? String(payload.query) : ""
     actionPanel.close()
     toast.hide()
     panel.confirmOpen = false
@@ -113,7 +114,7 @@ PanelWindow {
     } else if (payload && payload.command && panel.service && typeof panel.service.runCommandId === "function")
       panel.service.runCommandId(String(payload.command), panel, payload.arguments || {})
     else if (payload && payload.menu !== undefined && panel.service && typeof panel.service.runCommandId === "function")
-      panel.service.runCommandId("cmd:omarchy-menu", panel, { menu: String(payload.menu || "root") })
+      panel.service.runCommandId("cmd:omarchy-menu", panel, { menu: String(payload.menu || "root"), query: payload.query ? String(payload.query) : "" })
   }
 
   function dismiss() {

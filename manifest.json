@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "io.github.hominluo.launcher",
   "name": "Launcher",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Homin Luo",
   "license": "MIT",
   "homepage": "https://github.com/hominluo/omarchy-launcher",
-  "description": "Raycast-style launcher for Omarchy: apps, commands, calculator, clipboard, snippets, window management, and a runtime for Raycast extensions.",
+  "description": "Raycast-style launcher: apps, commands, the whole Omarchy menu, files, calculator, clipboard, snippets, window management, AI, and a runtime for Raycast Store extensions.",
   "kinds": [
     "overlay",
     "service",
