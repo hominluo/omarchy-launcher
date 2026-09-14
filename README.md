@@ -2,7 +2,8 @@
 
 <p align="center">
   Raycast for <a href="https://omarchy.org">Omarchy</a> — one hotkey, everything on
-  your machine, and extensions straight from the Raycast Store.
+  your machine, and extensions straight from the Raycast Store.<br>
+  <sub>by <a href="https://x.com/hominluo">@hominluo</a></sub>
 </p>
 
 <p align="center">
@@ -393,3 +394,12 @@ the sidecar bridge, `bin/` helper scripts.
 
 MIT — see [LICENSE](LICENSE). Not affiliated with Raycast; "Raycast" and the
 extension format belong to Raycast Technologies.
+
+---
+
+<p align="center">
+  Built by <a href="https://x.com/hominluo">@hominluo</a> ·
+  <a href="https://github.com/hominluo">GitHub</a> ·
+  <a href="https://github.com/hominluo/omarchy-launcher/issues">Issues</a> ·
+  <a href="https://github.com/hominluo/omarchy-launcher/releases">Releases</a>
+</p>
