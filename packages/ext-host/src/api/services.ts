@@ -4,6 +4,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { EventEmitter } from "node:events"
 import { getClient, unsupported } from "./client"
+import { atomicWrite } from "../fsio"
 import { ToastStyle, AlertActionStyle, LaunchType } from "./enums"
 
 // ---- environment & preferences
@@ -178,7 +179,7 @@ class JsonStore {
   private flush() {
     if (this.timer) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
-      try { fs.mkdirSync(path.dirname(this.file), { recursive: true }); fs.writeFileSync(this.file, JSON.stringify(this.data)) } catch (e) { getClient().log("storage write failed: " + e) }
+      try { atomicWrite(this.file, JSON.stringify(this.data)) } catch (e) { getClient().log("storage write failed: " + e) }
     }, 50)
   }
   get(k: string) { return this.load()[k] }
@@ -186,7 +187,7 @@ class JsonStore {
   remove(k: string) { delete this.load()[k]; this.flush() }
   all() { return { ...this.load() } }
   clear() { this.data = {}; this.flush() }
-  flushNow() { if (this.timer) { clearTimeout(this.timer); this.timer = null; try { fs.mkdirSync(path.dirname(this.file), { recursive: true }); fs.writeFileSync(this.file, JSON.stringify(this.data || {})) } catch {} } }
+  flushNow() { if (this.timer) { clearTimeout(this.timer); this.timer = null; try { atomicWrite(this.file, JSON.stringify(this.data || {})) } catch {} } }
 }
 let localStore: JsonStore | null = null
 function store() {
@@ -228,7 +229,7 @@ export class Cache {
   has(key: string) { return fs.existsSync(this.fileFor(key)) }
   get isEmpty() { try { return fs.readdirSync(this.dir).length === 0 } catch { return true } }
   set(key: string, data: string) {
-    try { fs.writeFileSync(this.fileFor(key), String(data)) } catch (e) { getClient().log("cache write failed: " + e) }
+    try { atomicWrite(this.fileFor(key), String(data)) } catch (e) { getClient().log("cache write failed: " + e) }
     this.evict()
     for (const s of this.subscribers) s(key, data)
   }
@@ -377,8 +378,7 @@ export const OAuth: any = {
     }
     async setTokens(tokens: any) {
       const data = { accessToken: tokens.accessToken || tokens.access_token, refreshToken: tokens.refreshToken || tokens.refresh_token, idToken: tokens.idToken || tokens.id_token, expiresIn: tokens.expiresIn || tokens.expires_in, scope: tokens.scope, updatedAt: Date.now() }
-      fs.mkdirSync(path.dirname(this.tokenFile), { recursive: true })
-      fs.writeFileSync(this.tokenFile, JSON.stringify(data), { mode: 0o600 })
+      atomicWrite(this.tokenFile, JSON.stringify(data), 0o600)
     }
     async removeTokens() { try { fs.unlinkSync(this.tokenFile) } catch {} }
   }

@@ -24,13 +24,13 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/index.ts
-var import_node_fs5 = __toESM(require("node:fs"));
-var import_node_path6 = __toESM(require("node:path"));
+var import_node_fs6 = __toESM(require("node:fs"));
+var import_node_path7 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
 
 // src/store.ts
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 
 // src/paths.ts
@@ -47,6 +47,54 @@ var SUPPORT_DIR = import_node_path.default.join(DATA_DIR, "support");
 var PREFS_DIR = import_node_path.default.join(CONFIG_DIR, "prefs");
 var SECRETS_DIR = import_node_path.default.join(DATA_DIR, "secrets");
 var PLUGIN_ID = "io.github.hominluo.launcher";
+
+// src/fsio.ts
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var import_node_crypto = require("node:crypto");
+var { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = import_node_fs.default.constants;
+function atomicWrite(file, data, mode = 384) {
+  const dir = import_node_path2.default.dirname(file);
+  import_node_fs.default.mkdirSync(dir, { recursive: true });
+  let tmp = "", fd = -1;
+  for (let i = 0; i < 32 && fd < 0; i++) {
+    tmp = import_node_path2.default.join(dir, `.${import_node_path2.default.basename(file)}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`);
+    try {
+      fd = import_node_fs.default.openSync(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  if (fd < 0) throw new Error(`could not create a temporary file beside ${file}`);
+  try {
+    const st = import_node_fs.default.fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid() || st.nlink !== 1) throw new Error(`unexpected file at ${tmp}; refusing to write`);
+    import_node_fs.default.writeSync(fd, data);
+    import_node_fs.default.fsyncSync(fd);
+    import_node_fs.default.closeSync(fd);
+    fd = -1;
+    import_node_fs.default.renameSync(tmp, file);
+  } catch (e) {
+    if (fd >= 0) try {
+      import_node_fs.default.closeSync(fd);
+    } catch {
+    }
+    try {
+      import_node_fs.default.unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
+}
+function safeSegment(value, what) {
+  const s = String(value ?? "");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(s)) throw new Error(`${what} "${s}" is not a safe directory name`);
+  return s;
+}
+function assertInsideExtDir(p) {
+  const rel = import_node_path2.default.relative(EXT_DIR, import_node_path2.default.resolve(p));
+  if (!rel || rel === ".." || rel.startsWith(".." + import_node_path2.default.sep) || import_node_path2.default.isAbsolute(rel)) throw new Error(`refusing to remove ${p}: not inside ${EXT_DIR}`);
+}
 
 // src/store.ts
 var API = "https://backend.raycast.com/api/v1";
@@ -82,36 +130,38 @@ async function lookup(spec) {
 async function download(meta, dest) {
   const url = meta.download_url;
   if (!url) throw new Error("the store did not return a download URL");
-  import_node_fs.default.mkdirSync(import_node_path2.default.join(CACHE_DIR, "downloads"), { recursive: true });
-  const zip = import_node_path2.default.join(CACHE_DIR, "downloads", `${meta.name}-${String(meta.commit_sha || "latest").slice(0, 12)}.zip`);
+  assertInsideExtDir(dest);
+  import_node_fs2.default.mkdirSync(import_node_path3.default.join(CACHE_DIR, "downloads"), { recursive: true });
+  const zip = import_node_path3.default.join(CACHE_DIR, "downloads", `${safeSegment(meta.name, "store extension name")}-${String(meta.commit_sha || "latest").replace(/[^0-9a-f]/g, "").slice(0, 12) || "latest"}.zip`);
   const res = await fetch(url, { headers: { "user-agent": "omarchy-launcher" } });
   if (!res.ok) throw new Error(`download failed: ${res.status}`);
-  import_node_fs.default.writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
-  const staging = import_node_fs.default.mkdtempSync(import_node_path2.default.join(CACHE_DIR, "stage-"));
+  import_node_fs2.default.writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+  const staging = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(CACHE_DIR, "stage-"));
   (0, import_node_child_process.execFileSync)("bsdtar", ["-xf", zip, "-C", staging]);
-  const entries = import_node_fs.default.readdirSync(staging);
-  const inner = entries.length === 1 ? import_node_path2.default.join(staging, entries[0]) : staging;
-  import_node_fs.default.rmSync(dest, { recursive: true, force: true });
-  import_node_fs.default.mkdirSync(import_node_path2.default.dirname(dest), { recursive: true });
-  import_node_fs.default.renameSync(inner, dest);
-  import_node_fs.default.rmSync(staging, { recursive: true, force: true });
-  for (const f of import_node_fs.default.readdirSync(dest)) if (f.endsWith(".js.map")) import_node_fs.default.rmSync(import_node_path2.default.join(dest, f));
-  const tools = import_node_path2.default.join(dest, "tools");
+  const entries = import_node_fs2.default.readdirSync(staging);
+  const inner = entries.length === 1 ? import_node_path3.default.join(staging, entries[0]) : staging;
+  assertInsideExtDir(dest);
+  import_node_fs2.default.rmSync(dest, { recursive: true, force: true });
+  import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(dest), { recursive: true });
+  import_node_fs2.default.renameSync(inner, dest);
+  import_node_fs2.default.rmSync(staging, { recursive: true, force: true });
+  for (const f of import_node_fs2.default.readdirSync(dest)) if (f.endsWith(".js.map")) import_node_fs2.default.rmSync(import_node_path3.default.join(dest, f));
+  const tools = import_node_path3.default.join(dest, "tools");
   try {
-    for (const f of import_node_fs.default.readdirSync(tools)) if (f.endsWith(".js.map")) import_node_fs.default.rmSync(import_node_path2.default.join(tools, f));
+    for (const f of import_node_fs2.default.readdirSync(tools)) if (f.endsWith(".js.map")) import_node_fs2.default.rmSync(import_node_path3.default.join(tools, f));
   } catch {
   }
   return dest;
 }
 
 // src/build.ts
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
 var import_node_child_process2 = require("node:child_process");
-var import_node_crypto = require("node:crypto");
+var import_node_crypto2 = require("node:crypto");
 function parseSource(spec) {
   const s = spec.trim();
-  if (import_node_fs2.default.existsSync(s) && import_node_fs2.default.existsSync(import_node_path3.default.join(s, "package.json"))) return { kind: "local", dir: import_node_path3.default.resolve(s) };
+  if (import_node_fs3.default.existsSync(s) && import_node_fs3.default.existsSync(import_node_path4.default.join(s, "package.json"))) return { kind: "local", dir: import_node_path4.default.resolve(s) };
   let m = s.match(/^https?:\/\/github\.com\/raycast\/extensions\/(?:tree|blob)\/([^/]+)\/extensions\/([^/?#]+)/);
   if (m) return { kind: "git", url: "https://github.com/raycast/extensions.git", ref: m[1], subdir: "extensions/" + m[2] };
   m = s.match(/^(git@[^#]+|https?:\/\/[^#]+?\.git|https?:\/\/github\.com\/[^/]+\/[^/#]+)(?:#(.+))?$/);
@@ -123,20 +173,20 @@ function run(cmd, args, cwd) {
   if (r.status !== 0) {
     const out = String(r.stderr || r.stdout || "");
     const cut = out.indexOf("node:child_process");
-    throw new Error(`${import_node_path3.default.basename(cmd)} ${args.slice(0, 2).join(" ")} failed:
+    throw new Error(`${import_node_path4.default.basename(cmd)} ${args.slice(0, 2).join(" ")} failed:
 ${(cut > 0 ? out.slice(0, cut) : out).trim().slice(-1500)}`);
   }
   return r.stdout;
 }
 function fetchSource(spec, log) {
   if (spec.kind === "local") return spec.dir;
-  const key = (0, import_node_crypto.createHash)("sha1").update(spec.url + "#" + (spec.subdir || "")).digest("hex").slice(0, 16);
-  const dir = import_node_path3.default.join(CACHE_DIR, "src", key);
-  if (import_node_fs2.default.existsSync(import_node_path3.default.join(dir, ".git"))) {
+  const key = (0, import_node_crypto2.createHash)("sha1").update(spec.url + "#" + (spec.subdir || "")).digest("hex").slice(0, 16);
+  const dir = import_node_path4.default.join(CACHE_DIR, "src", key);
+  if (import_node_fs3.default.existsSync(import_node_path4.default.join(dir, ".git"))) {
     log(`Updating ${spec.url}\u2026`);
     run("git", ["pull", "--ff-only", "--quiet"], dir);
   } else {
-    import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(dir), { recursive: true });
+    import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(dir), { recursive: true });
     log(`Cloning ${spec.url}${spec.subdir ? " (" + spec.subdir + ")" : ""}\u2026`);
     if (spec.subdir) {
       run("git", ["clone", "--filter=blob:none", "--sparse", "--depth", "1", ...spec.ref ? ["--branch", spec.ref] : [], spec.url, dir], CACHE_DIR);
@@ -145,31 +195,52 @@ function fetchSource(spec, log) {
       run("git", ["clone", "--depth", "1", ...spec.ref ? ["--branch", spec.ref] : [], spec.url, dir], CACHE_DIR);
     }
   }
-  const src = spec.subdir ? import_node_path3.default.join(dir, spec.subdir) : dir;
-  if (!import_node_fs2.default.existsSync(import_node_path3.default.join(src, "package.json"))) throw new Error("no package.json in " + src);
+  const src = spec.subdir ? import_node_path4.default.join(dir, spec.subdir) : dir;
+  if (!import_node_fs3.default.existsSync(import_node_path4.default.join(src, "package.json"))) throw new Error("no package.json in " + src);
   return src;
 }
 function findEntry(src, name, tools = false) {
-  const base = tools ? import_node_path3.default.join(src, "src", "tools") : import_node_path3.default.join(src, "src");
+  const base = tools ? import_node_path4.default.join(src, "src", "tools") : import_node_path4.default.join(src, "src");
   for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
-    const p = import_node_path3.default.join(base, name + ext);
-    if (import_node_fs2.default.existsSync(p)) return p;
+    const p = import_node_path4.default.join(base, name + ext);
+    if (import_node_fs3.default.existsSync(p)) return p;
   }
   return null;
 }
 function build(src, log) {
-  const manifest = JSON.parse(import_node_fs2.default.readFileSync(import_node_path3.default.join(src, "package.json"), "utf8"));
+  const manifest = JSON.parse(import_node_fs3.default.readFileSync(import_node_path4.default.join(src, "package.json"), "utf8"));
   if (!manifest.name) throw new Error("package.json has no name");
-  const owner = manifest.owner || manifest.author || "local";
+  const name = safeSegment(manifest.name, "extension name");
+  const owner = safeSegment(manifest.owner || manifest.author || "local", "extension owner");
   log("Installing dependencies (npm, scripts disabled)\u2026");
-  const hasLock = import_node_fs2.default.existsSync(import_node_path3.default.join(src, "package-lock.json"));
+  const hasLock = import_node_fs3.default.existsSync(import_node_path4.default.join(src, "package-lock.json"));
   run("npm", [hasLock ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], src);
-  const esbuild = import_node_path3.default.join(src, "node_modules", "esbuild", "bin", "esbuild");
-  if (!import_node_fs2.default.existsSync(esbuild)) throw new Error("esbuild not found in the extension's node_modules (is @raycast/api a dependency?)");
-  const dest = import_node_path3.default.join(EXT_DIR, owner, manifest.name);
-  const staging = dest + ".building";
-  import_node_fs2.default.rmSync(staging, { recursive: true, force: true });
-  import_node_fs2.default.mkdirSync(staging, { recursive: true });
+  const esbuild = import_node_path4.default.join(src, "node_modules", "esbuild", "bin", "esbuild");
+  if (!import_node_fs3.default.existsSync(esbuild)) throw new Error("esbuild not found in the extension's node_modules (is @raycast/api a dependency?)");
+  const dest = import_node_path4.default.join(EXT_DIR, owner, name);
+  assertInsideExtDir(dest);
+  import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(dest), { recursive: true });
+  const staging = import_node_fs3.default.mkdtempSync(dest + ".building-");
+  try {
+    bundle(src, manifest, staging, log);
+  } catch (e) {
+    import_node_fs3.default.rmSync(staging, { recursive: true, force: true });
+    throw e;
+  }
+  let commit = "";
+  try {
+    commit = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "HEAD"], { cwd: src, encoding: "utf8" }).trim();
+  } catch {
+  }
+  import_node_fs3.default.rmSync(dest, { recursive: true, force: true });
+  import_node_fs3.default.renameSync(staging, dest);
+  return { dir: dest, manifest, commit, owner, name };
+}
+function plainName(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+}
+function bundle(src, manifest, staging, log) {
+  const esbuild = import_node_path4.default.join(src, "node_modules", "esbuild", "bin", "esbuild");
   const common = [
     "--bundle",
     "--platform=node",
@@ -193,43 +264,43 @@ function build(src, log) {
     '--define:process.env.NODE_ENV="production"'
   ];
   for (const cmd of manifest.commands || []) {
+    if (!plainName(cmd.name)) {
+      log(`  skipping command ${JSON.stringify(cmd.name)}: not a plain name`);
+      continue;
+    }
     const entry = findEntry(src, cmd.name);
     if (!entry) {
       log(`  skipping ${cmd.name}: no src/${cmd.name}.{tsx,ts,jsx,js}`);
       continue;
     }
     log(`  bundling ${cmd.name}`);
-    run("node", [esbuild, entry, `--outfile=${import_node_path3.default.join(staging, cmd.name + ".js")}`, ...common], src);
+    run("node", [esbuild, entry, `--outfile=${import_node_path4.default.join(staging, cmd.name + ".js")}`, ...common], src);
   }
   if (Array.isArray(manifest.tools) && manifest.tools.length) {
-    import_node_fs2.default.mkdirSync(import_node_path3.default.join(staging, "tools"), { recursive: true });
+    import_node_fs3.default.mkdirSync(import_node_path4.default.join(staging, "tools"), { recursive: true });
     for (const tool of manifest.tools) {
+      if (!plainName(tool.name)) {
+        log(`  skipping tool ${JSON.stringify(tool.name)}: not a plain name`);
+        continue;
+      }
       const entry = findEntry(src, tool.name, true);
       if (!entry) continue;
       log(`  bundling tool ${tool.name}`);
-      run("node", [esbuild, entry, `--outfile=${import_node_path3.default.join(staging, "tools", tool.name + ".js")}`, ...common], src);
+      run("node", [esbuild, entry, `--outfile=${import_node_path4.default.join(staging, "tools", tool.name + ".js")}`, ...common], src);
     }
   }
-  import_node_fs2.default.copyFileSync(import_node_path3.default.join(src, "package.json"), import_node_path3.default.join(staging, "package.json"));
-  if (import_node_fs2.default.existsSync(import_node_path3.default.join(src, "assets"))) import_node_fs2.default.cpSync(import_node_path3.default.join(src, "assets"), import_node_path3.default.join(staging, "assets"), { recursive: true });
-  for (const f of import_node_fs2.default.readdirSync(staging)) if (f.endsWith(".js.map")) import_node_fs2.default.rmSync(import_node_path3.default.join(staging, f));
-  let commit = "";
-  try {
-    commit = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "HEAD"], { cwd: src, encoding: "utf8" }).trim();
-  } catch {
-  }
-  import_node_fs2.default.rmSync(dest, { recursive: true, force: true });
-  import_node_fs2.default.renameSync(staging, dest);
-  return { dir: dest, manifest, commit };
+  import_node_fs3.default.copyFileSync(import_node_path4.default.join(src, "package.json"), import_node_path4.default.join(staging, "package.json"));
+  if (import_node_fs3.default.existsSync(import_node_path4.default.join(src, "assets"))) import_node_fs3.default.cpSync(import_node_path4.default.join(src, "assets"), import_node_path4.default.join(staging, "assets"), { recursive: true });
+  for (const f of import_node_fs3.default.readdirSync(staging)) if (f.endsWith(".js.map")) import_node_fs3.default.rmSync(import_node_path4.default.join(staging, f));
 }
 
 // src/registry.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
 
 // src/compat.ts
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 var MARKERS = [
   [/\(0,\s*[A-Za-z_$][\w$]*\.runAppleScript\)\(|[^\w$.]runAppleScript\(`|tell application "|\.applescript\b/, "AppleScript", "unsupported"],
   [/(require|import)\("(swift|rust):/, "native macOS module (swift:/rust: import)", "unsupported"],
@@ -240,10 +311,10 @@ var MARKERS = [
 ];
 function isMachO(file) {
   try {
-    const fd = import_node_fs3.default.openSync(file, "r");
+    const fd = import_node_fs4.default.openSync(file, "r");
     const b = Buffer.alloc(4);
-    import_node_fs3.default.readSync(fd, b, 0, 4, 0);
-    import_node_fs3.default.closeSync(fd);
+    import_node_fs4.default.readSync(fd, b, 0, 4, 0);
+    import_node_fs4.default.closeSync(fd);
     const magic = b.readUInt32BE(0);
     return magic === 4277009102 || magic === 4277009103 || magic === 3405691582 || magic === 3472551422 || magic === 3489328638;
   } catch {
@@ -254,11 +325,11 @@ function scan(dir, manifest) {
   const report = { status: "full", notes: [], commands: {} };
   const worst = (a, b) => a === "unsupported" || b === "unsupported" ? "unsupported" : a === "partial" || b === "partial" ? "partial" : "full";
   for (const cmd of manifest.commands || []) {
-    const file = import_node_path4.default.join(dir, cmd.name + ".js");
+    const file = import_node_path5.default.join(dir, cmd.name + ".js");
     const entry = { status: "full", notes: [] };
     let src = "";
     try {
-      src = import_node_fs3.default.readFileSync(file, "utf8");
+      src = import_node_fs4.default.readFileSync(file, "utf8");
     } catch {
       entry.status = "unsupported";
       entry.notes.push("bundle missing");
@@ -280,11 +351,11 @@ function scan(dir, manifest) {
     report.status = worst(report.status, entry.status);
     for (const n of entry.notes) if (report.notes.indexOf(n) < 0) report.notes.push(n);
   }
-  const assets = import_node_path4.default.join(dir, "assets");
+  const assets = import_node_path5.default.join(dir, "assets");
   try {
-    for (const f of import_node_fs3.default.readdirSync(assets)) {
-      const p = import_node_path4.default.join(assets, f);
-      if (import_node_fs3.default.statSync(p).isFile() && (f.endsWith(".swift") || isMachO(p))) {
+    for (const f of import_node_fs4.default.readdirSync(assets)) {
+      const p = import_node_path5.default.join(assets, f);
+      if (import_node_fs4.default.statSync(p).isFile() && (f.endsWith(".swift") || isMachO(p))) {
         report.notes.push("native macOS helper: " + f);
         report.status = "unsupported";
       }
@@ -298,29 +369,27 @@ function scan(dir, manifest) {
 // src/registry.ts
 function readIndex() {
   try {
-    const d = JSON.parse(import_node_fs4.default.readFileSync(INDEX_FILE, "utf8"));
+    const d = JSON.parse(import_node_fs5.default.readFileSync(INDEX_FILE, "utf8"));
     if (d && Array.isArray(d.extensions)) return d;
   } catch {
   }
   return { version: 1, extensions: [] };
 }
 function writeIndex(idx) {
-  import_node_fs4.default.mkdirSync(EXT_DIR, { recursive: true });
-  const tmp = INDEX_FILE + ".tmp";
-  import_node_fs4.default.writeFileSync(tmp, JSON.stringify(idx, null, 2) + "\n");
-  import_node_fs4.default.renameSync(tmp, INDEX_FILE);
+  import_node_fs5.default.mkdirSync(EXT_DIR, { recursive: true });
+  atomicWrite(INDEX_FILE, JSON.stringify(idx, null, 2) + "\n", 420);
 }
 function entryFor(dir, owner, name, install) {
-  const manifest = JSON.parse(import_node_fs4.default.readFileSync(import_node_path5.default.join(dir, "package.json"), "utf8"));
+  const manifest = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dir, "package.json"), "utf8"));
   const compat = scan(dir, manifest);
-  const iconFile = manifest.icon ? import_node_path5.default.join(dir, "assets", manifest.icon) : "";
+  const iconFile = manifest.icon ? import_node_path6.default.join(dir, "assets", manifest.icon) : "";
   return {
     id: `${owner}/${name}`,
     owner,
     name,
     title: String(manifest.title || name),
     description: String(manifest.description || ""),
-    icon: iconFile && import_node_fs4.default.existsSync(iconFile) ? iconFile : "",
+    icon: iconFile && import_node_fs5.default.existsSync(iconFile) ? iconFile : "",
     dir,
     source: install.source || "store",
     commit: String(install.commit || ""),
@@ -334,7 +403,7 @@ function entryFor(dir, owner, name, install) {
       subtitle: c.subtitle || "",
       description: c.description || "",
       mode: c.mode || "view",
-      icon: c.icon && import_node_fs4.default.existsSync(import_node_path5.default.join(dir, "assets", c.icon)) ? import_node_path5.default.join(dir, "assets", c.icon) : "",
+      icon: c.icon && import_node_fs5.default.existsSync(import_node_path6.default.join(dir, "assets", c.icon)) ? import_node_path6.default.join(dir, "assets", c.icon) : "",
       keywords: c.keywords || [],
       arguments: c.arguments || [],
       preferences: c.preferences || [],
@@ -348,15 +417,15 @@ function entryFor(dir, owner, name, install) {
 function rebuild() {
   const out = [];
   try {
-    for (const owner of import_node_fs4.default.readdirSync(EXT_DIR)) {
-      const od = import_node_path5.default.join(EXT_DIR, owner);
-      if (!import_node_fs4.default.statSync(od).isDirectory()) continue;
-      for (const name of import_node_fs4.default.readdirSync(od)) {
-        const dir = import_node_path5.default.join(od, name);
-        if (!import_node_fs4.default.existsSync(import_node_path5.default.join(dir, "package.json"))) continue;
+    for (const owner of import_node_fs5.default.readdirSync(EXT_DIR)) {
+      const od = import_node_path6.default.join(EXT_DIR, owner);
+      if (!import_node_fs5.default.statSync(od).isDirectory()) continue;
+      for (const name of import_node_fs5.default.readdirSync(od)) {
+        const dir = import_node_path6.default.join(od, name);
+        if (!import_node_fs5.default.existsSync(import_node_path6.default.join(dir, "package.json"))) continue;
         let install = {};
         try {
-          install = JSON.parse(import_node_fs4.default.readFileSync(import_node_path5.default.join(dir, "install.json"), "utf8"));
+          install = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dir, "install.json"), "utf8"));
         } catch {
         }
         try {
@@ -404,10 +473,9 @@ async function extInstallSource(spec) {
   const log = (line) => process.stdout.write(line + "\n");
   const src = fetchSource(source, log);
   const built = build(src, log);
-  const owner = built.manifest.owner || built.manifest.author || "local";
-  import_node_fs5.default.writeFileSync(import_node_path6.default.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner, name: built.manifest.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2));
+  atomicWrite(import_node_path7.default.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner: built.owner, name: built.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2), 420);
   const idx = readIndex();
-  const entry = entryFor(built.dir, owner, built.manifest.name, JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(built.dir, "install.json"), "utf8")));
+  const entry = entryFor(built.dir, built.owner, built.name, JSON.parse(import_node_fs6.default.readFileSync(import_node_path7.default.join(built.dir, "install.json"), "utf8")));
   idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
   writeIndex(idx);
   process.stdout.write(`Built and installed ${entry.title}: ${entry.commands.map((c) => c.title).join(", ")}
@@ -417,21 +485,22 @@ async function extInstallSource(spec) {
   shell("reindex");
 }
 async function extInstall(spec) {
-  if (/^(https?:\/\/|git@)/.test(spec) && !/raycast\.com\//.test(spec) || import_node_fs5.default.existsSync(spec) && import_node_fs5.default.existsSync(import_node_path6.default.join(spec, "package.json"))) return extInstallSource(spec);
+  if (/^(https?:\/\/|git@)/.test(spec) && !/raycast\.com\//.test(spec) || import_node_fs6.default.existsSync(spec) && import_node_fs6.default.existsSync(import_node_path7.default.join(spec, "package.json"))) return extInstallSource(spec);
   const r = resolveSpec(spec);
   if (!r) throw new Error(`cannot parse "${spec}"; use owner/name or a store URL`);
   process.stdout.write(`Looking up ${r.owner ? r.owner + "/" : ""}${r.name}\u2026
 `);
   const meta = await lookup(r);
   if (meta.kill_listed_at) throw new Error("this extension was removed from the store");
-  const owner = meta.owner && meta.owner.handle || meta.author && meta.author.handle || r.owner || "unknown";
-  const dest = import_node_path6.default.join(EXT_DIR, owner, meta.name);
-  process.stdout.write(`Downloading ${meta.title} (${owner}/${meta.name}, api ${meta.api_version})\u2026
+  const owner = safeSegment(meta.owner && meta.owner.handle || meta.author && meta.author.handle || r.owner || "unknown", "store owner");
+  const name = safeSegment(meta.name, "store extension name");
+  const dest = import_node_path7.default.join(EXT_DIR, owner, name);
+  process.stdout.write(`Downloading ${meta.title} (${owner}/${name}, api ${meta.api_version})\u2026
 `);
   await download(meta, dest);
-  import_node_fs5.default.writeFileSync(import_node_path6.default.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name: meta.name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2));
+  atomicWrite(import_node_path7.default.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2), 420);
   const idx = readIndex();
-  const entry = entryFor(dest, owner, meta.name, JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dest, "install.json"), "utf8")));
+  const entry = entryFor(dest, owner, name, JSON.parse(import_node_fs6.default.readFileSync(import_node_path7.default.join(dest, "install.json"), "utf8")));
   idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
   writeIndex(idx);
   process.stdout.write(`Installed ${entry.title}: ${entry.commands.map((c) => c.title).join(", ")}
@@ -451,7 +520,7 @@ async function extUpdate(spec) {
     if (e.source !== "store") {
       let origin = "";
       try {
-        origin = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(e.dir, "install.json"), "utf8")).origin || "";
+        origin = JSON.parse(import_node_fs6.default.readFileSync(import_node_path7.default.join(e.dir, "install.json"), "utf8")).origin || "";
       } catch {
       }
       if (origin) {
@@ -476,7 +545,8 @@ function extRemove(spec) {
   const idx = readIndex();
   const e = idx.extensions.find((x) => x.id === spec || x.name === spec);
   if (!e) throw new Error(`not installed: ${spec}`);
-  import_node_fs5.default.rmSync(e.dir, { recursive: true, force: true });
+  assertInsideExtDir(e.dir);
+  import_node_fs6.default.rmSync(e.dir, { recursive: true, force: true });
   idx.extensions = idx.extensions.filter((x) => x.id !== e.id);
   writeIndex(idx);
   process.stdout.write(`Removed ${e.id}
@@ -563,7 +633,7 @@ function handleUrl(uri) {
 }
 async function main(argv) {
   const [cmd, sub, ...rest] = argv;
-  for (const d of [CONFIG_DIR, DATA_DIR, STATE_DIR, EXT_DIR, PREFS_DIR]) import_node_fs5.default.mkdirSync(d, { recursive: true });
+  for (const d of [CONFIG_DIR, DATA_DIR, STATE_DIR, EXT_DIR, PREFS_DIR]) import_node_fs6.default.mkdirSync(d, { recursive: true });
   switch (cmd) {
     case "ext":
       if (sub === "install") {

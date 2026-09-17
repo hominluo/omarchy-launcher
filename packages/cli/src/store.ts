@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
 import { CACHE_DIR } from "./paths"
+import { safeSegment, assertInsideExtDir } from "./fsio"
 
 const API = "https://backend.raycast.com/api/v1"
 
@@ -46,8 +47,9 @@ export async function lookup(spec: Resolved): Promise<any> {
 export async function download(meta: any, dest: string): Promise<string> {
   const url = meta.download_url
   if (!url) throw new Error("the store did not return a download URL")
+  assertInsideExtDir(dest)
   fs.mkdirSync(path.join(CACHE_DIR, "downloads"), { recursive: true })
-  const zip = path.join(CACHE_DIR, "downloads", `${meta.name}-${String(meta.commit_sha || "latest").slice(0, 12)}.zip`)
+  const zip = path.join(CACHE_DIR, "downloads", `${safeSegment(meta.name, "store extension name")}-${String(meta.commit_sha || "latest").replace(/[^0-9a-f]/g, "").slice(0, 12) || "latest"}.zip`)
   const res = await fetch(url, { headers: { "user-agent": "omarchy-launcher" } })
   if (!res.ok) throw new Error(`download failed: ${res.status}`)
   fs.writeFileSync(zip, Buffer.from(await res.arrayBuffer()))
@@ -56,6 +58,7 @@ export async function download(meta: any, dest: string): Promise<string> {
   // The zip holds one top-level folder named after the extension.
   const entries = fs.readdirSync(staging)
   const inner = entries.length === 1 ? path.join(staging, entries[0]) : staging
+  assertInsideExtDir(dest)
   fs.rmSync(dest, { recursive: true, force: true })
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   fs.renameSync(inner, dest)

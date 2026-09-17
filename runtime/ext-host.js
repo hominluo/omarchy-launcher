@@ -1404,6 +1404,50 @@ var init_components = __esm({
   }
 });
 
+// src/fsio.ts
+function atomicWrite(file, data, mode = 384) {
+  const dir = path2.dirname(file);
+  fs2.mkdirSync(dir, { recursive: true });
+  let tmp = "", fd = -1;
+  for (let i = 0; i < 32 && fd < 0; i++) {
+    tmp = path2.join(dir, `.${path2.basename(file)}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`);
+    try {
+      fd = fs2.openSync(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  if (fd < 0) throw new Error(`could not create a temporary file beside ${file}`);
+  try {
+    const st = fs2.fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid() || st.nlink !== 1) throw new Error(`unexpected file at ${tmp}; refusing to write`);
+    fs2.writeSync(fd, data);
+    fs2.fsyncSync(fd);
+    fs2.closeSync(fd);
+    fd = -1;
+    fs2.renameSync(tmp, file);
+  } catch (e) {
+    if (fd >= 0) try {
+      fs2.closeSync(fd);
+    } catch {
+    }
+    try {
+      fs2.unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
+}
+var fs2, path2, import_node_crypto, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW;
+var init_fsio = __esm({
+  "src/fsio.ts"() {
+    fs2 = __toESM(require("node:fs"));
+    path2 = __toESM(require("node:path"));
+    import_node_crypto = require("node:crypto");
+    ({ O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs2.constants);
+  }
+});
+
 // src/api/services.ts
 function getPreferenceValues() {
   return { ...getClient().preferences };
@@ -1455,7 +1499,7 @@ function contentOf(content) {
   return { text: content.text !== void 0 ? String(content.text) : "", html: content.html ? String(content.html) : void 0, file: content.file ? String(content.file) : void 0 };
 }
 function store() {
-  if (!localStore) localStore = new JsonStore(path2.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
+  if (!localStore) localStore = new JsonStore(path3.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
   return localStore;
 }
 function flushStorage() {
@@ -1513,13 +1557,14 @@ async function updateCommandMetadata(metadata2) {
   const client2 = getClient();
   client2.notify("command.updateMetadata", { s: client2.sessionId, subtitle: metadata2 && metadata2.subtitle !== void 0 ? metadata2.subtitle : null });
 }
-var fs2, path2, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
+var fs3, path3, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
 var init_services = __esm({
   "src/api/services.ts"() {
-    fs2 = __toESM(require("node:fs"));
-    path2 = __toESM(require("node:path"));
+    fs3 = __toESM(require("node:fs"));
+    path3 = __toESM(require("node:path"));
     import_node_events = require("node:events");
     init_client();
+    init_fsio();
     init_enums();
     environment = {
       get raycastVersion() {
@@ -1687,7 +1732,7 @@ var init_services = __esm({
       load() {
         if (this.data) return this.data;
         try {
-          this.data = JSON.parse(fs2.readFileSync(this.file, "utf8"));
+          this.data = JSON.parse(fs3.readFileSync(this.file, "utf8"));
         } catch {
           this.data = {};
         }
@@ -1698,8 +1743,7 @@ var init_services = __esm({
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
           try {
-            fs2.mkdirSync(path2.dirname(this.file), { recursive: true });
-            fs2.writeFileSync(this.file, JSON.stringify(this.data));
+            atomicWrite(this.file, JSON.stringify(this.data));
           } catch (e) {
             getClient().log("storage write failed: " + e);
           }
@@ -1728,8 +1772,7 @@ var init_services = __esm({
           clearTimeout(this.timer);
           this.timer = null;
           try {
-            fs2.mkdirSync(path2.dirname(this.file), { recursive: true });
-            fs2.writeFileSync(this.file, JSON.stringify(this.data || {}));
+            atomicWrite(this.file, JSON.stringify(this.data || {}));
           } catch {
           }
         }
@@ -1765,35 +1808,35 @@ var init_services = __esm({
       constructor(options) {
         const ns = options && options.namespace ? String(options.namespace).replace(/[^A-Za-z0-9._-]/g, "_") : "default";
         this.capacity = options && options.capacity ? Number(options.capacity) : 10 * 1024 * 1024;
-        this.dir = path2.join(getClient().env.supportPath, ".launcher", "cache", ns);
+        this.dir = path3.join(getClient().env.supportPath, ".launcher", "cache", ns);
         try {
-          fs2.mkdirSync(this.dir, { recursive: true });
+          fs3.mkdirSync(this.dir, { recursive: true });
         } catch {
         }
       }
       fileFor(key) {
-        return path2.join(this.dir, Buffer.from(String(key)).toString("base64url"));
+        return path3.join(this.dir, Buffer.from(String(key)).toString("base64url"));
       }
       get(key) {
         try {
-          return fs2.readFileSync(this.fileFor(key), "utf8");
+          return fs3.readFileSync(this.fileFor(key), "utf8");
         } catch {
           return void 0;
         }
       }
       has(key) {
-        return fs2.existsSync(this.fileFor(key));
+        return fs3.existsSync(this.fileFor(key));
       }
       get isEmpty() {
         try {
-          return fs2.readdirSync(this.dir).length === 0;
+          return fs3.readdirSync(this.dir).length === 0;
         } catch {
           return true;
         }
       }
       set(key, data) {
         try {
-          fs2.writeFileSync(this.fileFor(key), String(data));
+          atomicWrite(this.fileFor(key), String(data));
         } catch (e) {
           getClient().log("cache write failed: " + e);
         }
@@ -1803,7 +1846,7 @@ var init_services = __esm({
       remove(key) {
         let removed = false;
         try {
-          fs2.unlinkSync(this.fileFor(key));
+          fs3.unlinkSync(this.fileFor(key));
           removed = true;
         } catch {
         }
@@ -1812,7 +1855,7 @@ var init_services = __esm({
       }
       clear(options) {
         try {
-          for (const f of fs2.readdirSync(this.dir)) fs2.unlinkSync(path2.join(this.dir, f));
+          for (const f of fs3.readdirSync(this.dir)) fs3.unlinkSync(path3.join(this.dir, f));
         } catch {
         }
         if (!(options && options.notifySubscribers === false)) for (const s of this.subscribers) s(void 0, void 0);
@@ -1825,8 +1868,8 @@ var init_services = __esm({
       }
       evict() {
         try {
-          const entries = fs2.readdirSync(this.dir).map((f) => {
-            const st = fs2.statSync(path2.join(this.dir, f));
+          const entries = fs3.readdirSync(this.dir).map((f) => {
+            const st = fs3.statSync(path3.join(this.dir, f));
             return { f, size: st.size, atime: st.atimeMs };
           });
           let total = entries.reduce((a, e) => a + e.size, 0);
@@ -1835,7 +1878,7 @@ var init_services = __esm({
           for (const e of entries) {
             if (total <= this.capacity) break;
             try {
-              fs2.unlinkSync(path2.join(this.dir, e.f));
+              fs3.unlinkSync(path3.join(this.dir, e.f));
               total -= e.size;
             } catch {
             }
@@ -1912,7 +1955,7 @@ var init_services = __esm({
           this.providerIcon = options.providerIcon;
           this.providerId = String(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
           this.description = String(options.description || "");
-          this.tokenFile = path2.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
+          this.tokenFile = path3.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
         }
         get redirectURL() {
           if (this.redirectMethod === "app") return "raycast://oauth?package_name=Extension";
@@ -1943,7 +1986,7 @@ var init_services = __esm({
         }
         async getTokens() {
           try {
-            const data = JSON.parse(fs2.readFileSync(this.tokenFile, "utf8"));
+            const data = JSON.parse(fs3.readFileSync(this.tokenFile, "utf8"));
             return { ...data, isExpired: () => data.expiresIn ? Date.now() > (data.updatedAt || 0) + Number(data.expiresIn) * 1e3 - 1e4 : false };
           } catch {
             return void 0;
@@ -1951,12 +1994,11 @@ var init_services = __esm({
         }
         async setTokens(tokens) {
           const data = { accessToken: tokens.accessToken || tokens.access_token, refreshToken: tokens.refreshToken || tokens.refresh_token, idToken: tokens.idToken || tokens.id_token, expiresIn: tokens.expiresIn || tokens.expires_in, scope: tokens.scope, updatedAt: Date.now() };
-          fs2.mkdirSync(path2.dirname(this.tokenFile), { recursive: true });
-          fs2.writeFileSync(this.tokenFile, JSON.stringify(data), { mode: 384 });
+          atomicWrite(this.tokenFile, JSON.stringify(data), 384);
         }
         async removeTokens() {
           try {
-            fs2.unlinkSync(this.tokenFile);
+            fs3.unlinkSync(this.tokenFile);
           } catch {
           }
         }
@@ -2123,7 +2165,7 @@ function runWorker(data) {
   };
   setClient(client2);
   try {
-    fs3.mkdirSync(load.paths.support, { recursive: true });
+    fs4.mkdirSync(load.paths.support, { recursive: true });
   } catch {
   }
   port.on("message", (m) => {
@@ -2371,11 +2413,11 @@ function runWorker(data) {
     return !(fn.constructor && fn.constructor.name === "AsyncFunction");
   }
 }
-var import_node_worker_threads, fs3, React2;
+var import_node_worker_threads, fs4, React2;
 var init_worker = __esm({
   "src/worker.tsx"() {
     import_node_worker_threads = require("node:worker_threads");
-    fs3 = __toESM(require("node:fs"));
+    fs4 = __toESM(require("node:fs"));
     React2 = __toESM(require_react());
     init_client();
     init_patch_require();

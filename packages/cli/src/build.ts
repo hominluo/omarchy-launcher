@@ -5,6 +5,7 @@ import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { CACHE_DIR, EXT_DIR } from "./paths"
+import { safeSegment, assertInsideExtDir } from "./fsio"
 
 export interface SourceSpec { kind: "local" | "git"; dir?: string; url?: string; subdir?: string; ref?: string }
 
@@ -60,24 +61,46 @@ function findEntry(src: string, name: string, tools = false): string | null {
   return null
 }
 
-export function build(src: string, log: (s: string) => void): { dir: string; manifest: any; commit: string } {
+export function build(src: string, log: (s: string) => void): { dir: string; manifest: any; commit: string; owner: string; name: string } {
   const manifest = JSON.parse(fs.readFileSync(path.join(src, "package.json"), "utf8"))
   if (!manifest.name) throw new Error("package.json has no name")
-  const owner = manifest.owner || manifest.author || "local"
+  // The manifest is untrusted input that names the install directory; refuse
+  // anything but a plain path component before npm or esbuild run.
+  const name = safeSegment(manifest.name, "extension name")
+  const owner = safeSegment(manifest.owner || manifest.author || "local", "extension owner")
   log("Installing dependencies (npm, scripts disabled)…")
   const hasLock = fs.existsSync(path.join(src, "package-lock.json"))
   run("npm", [hasLock ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], src)
   const esbuild = path.join(src, "node_modules", "esbuild", "bin", "esbuild")
   if (!fs.existsSync(esbuild)) throw new Error("esbuild not found in the extension's node_modules (is @raycast/api a dependency?)")
-  const dest = path.join(EXT_DIR, owner, manifest.name)
-  const staging = dest + ".building"
-  fs.rmSync(staging, { recursive: true, force: true })
-  fs.mkdirSync(staging, { recursive: true })
+  const dest = path.join(EXT_DIR, owner, name)
+  assertInsideExtDir(dest)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  const staging = fs.mkdtempSync(dest + ".building-")
+  try {
+    bundle(src, manifest, staging, log)
+  } catch (e) {
+    fs.rmSync(staging, { recursive: true, force: true })
+    throw e
+  }
+  let commit = ""
+  try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: src, encoding: "utf8" }).trim() } catch {}
+  fs.rmSync(dest, { recursive: true, force: true })
+  fs.renameSync(staging, dest)
+  return { dir: dest, manifest, commit, owner, name }
+}
+
+// Command and tool names become file names under the install directory.
+function plainName(value: any) { return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value) }
+
+function bundle(src: string, manifest: any, staging: string, log: (s: string) => void) {
+  const esbuild = path.join(src, "node_modules", "esbuild", "bin", "esbuild")
   const common = ["--bundle", "--platform=node", "--target=node22", "--format=cjs", "--jsx=automatic", "--minify", "--sourcemap=linked", "--log-level=warning",
     "--external:@raycast/api", "--external:react", "--external:react/jsx-runtime", "--external:react/jsx-dev-runtime",
     "--external:swift:*", "--external:rust:*",   // Raycast's native-module imports (macOS only); the compat scan flags them
     "--loader:.node=file", "--loader:.swift=empty", "--loader:.ps1=text", "--loader:.md=text", "--define:process.env.NODE_ENV=\"production\""]
   for (const cmd of manifest.commands || []) {
+    if (!plainName(cmd.name)) { log(`  skipping command ${JSON.stringify(cmd.name)}: not a plain name`); continue }
     const entry = findEntry(src, cmd.name)
     if (!entry) { log(`  skipping ${cmd.name}: no src/${cmd.name}.{tsx,ts,jsx,js}`); continue }
     log(`  bundling ${cmd.name}`)
@@ -86,6 +109,7 @@ export function build(src: string, log: (s: string) => void): { dir: string; man
   if (Array.isArray(manifest.tools) && manifest.tools.length) {
     fs.mkdirSync(path.join(staging, "tools"), { recursive: true })
     for (const tool of manifest.tools) {
+      if (!plainName(tool.name)) { log(`  skipping tool ${JSON.stringify(tool.name)}: not a plain name`); continue }
       const entry = findEntry(src, tool.name, true)
       if (!entry) continue
       log(`  bundling tool ${tool.name}`)
@@ -95,9 +119,4 @@ export function build(src: string, log: (s: string) => void): { dir: string; man
   fs.copyFileSync(path.join(src, "package.json"), path.join(staging, "package.json"))
   if (fs.existsSync(path.join(src, "assets"))) fs.cpSync(path.join(src, "assets"), path.join(staging, "assets"), { recursive: true })
   for (const f of fs.readdirSync(staging)) if (f.endsWith(".js.map")) fs.rmSync(path.join(staging, f))
-  let commit = ""
-  try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: src, encoding: "utf8" }).trim() } catch {}
-  fs.rmSync(dest, { recursive: true, force: true })
-  fs.renameSync(staging, dest)
-  return { dir: dest, manifest, commit }
 }

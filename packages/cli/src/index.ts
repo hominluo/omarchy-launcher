@@ -6,6 +6,7 @@ import { resolveSpec, lookup, download, search } from "./store"
 import { parseSource, fetchSource, build } from "./build"
 import { readIndex, rebuild, entryFor, writeIndex } from "./registry"
 import { EXT_DIR, PLUGIN_ID, CONFIG_DIR, DATA_DIR, STATE_DIR, PREFS_DIR } from "./paths"
+import { atomicWrite, safeSegment, assertInsideExtDir } from "./fsio"
 
 const USAGE = `launcher — Omarchy Launcher command line
 
@@ -37,10 +38,9 @@ async function extInstallSource(spec: string) {
   const log = (line: string) => process.stdout.write(line + "\n")
   const src = fetchSource(source, log)
   const built = build(src, log)
-  const owner = built.manifest.owner || built.manifest.author || "local"
-  fs.writeFileSync(path.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner, name: built.manifest.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2))
+  atomicWrite(path.join(built.dir, "install.json"), JSON.stringify({ source: source.kind, owner: built.owner, name: built.name, commit: built.commit, apiVersion: "", installedAt: Date.now(), origin: source.kind === "git" ? source.url + (source.subdir ? "#" + source.subdir : "") : source.dir }, null, 2), 0o644)
   const idx = readIndex()
-  const entry = entryFor(built.dir, owner, built.manifest.name, JSON.parse(fs.readFileSync(path.join(built.dir, "install.json"), "utf8")))
+  const entry = entryFor(built.dir, built.owner, built.name, JSON.parse(fs.readFileSync(path.join(built.dir, "install.json"), "utf8")))
   idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id))
   writeIndex(idx)
   process.stdout.write(`Built and installed ${entry.title}: ${entry.commands.map((c: any) => c.title).join(", ")}\n`)
@@ -55,13 +55,15 @@ async function extInstall(spec: string) {
   process.stdout.write(`Looking up ${r.owner ? r.owner + "/" : ""}${r.name}…\n`)
   const meta = await lookup(r)
   if (meta.kill_listed_at) throw new Error("this extension was removed from the store")
-  const owner = (meta.owner && meta.owner.handle) || (meta.author && meta.author.handle) || r.owner || "unknown"
-  const dest = path.join(EXT_DIR, owner, meta.name)
-  process.stdout.write(`Downloading ${meta.title} (${owner}/${meta.name}, api ${meta.api_version})…\n`)
+  // The store's answer names the install directory; only plain path components may.
+  const owner = safeSegment((meta.owner && meta.owner.handle) || (meta.author && meta.author.handle) || r.owner || "unknown", "store owner")
+  const name = safeSegment(meta.name, "store extension name")
+  const dest = path.join(EXT_DIR, owner, name)
+  process.stdout.write(`Downloading ${meta.title} (${owner}/${name}, api ${meta.api_version})…\n`)
   await download(meta, dest)
-  fs.writeFileSync(path.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name: meta.name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2))
+  atomicWrite(path.join(dest, "install.json"), JSON.stringify({ source: "store", owner, name, commit: meta.commit_sha, apiVersion: meta.api_version, installedAt: Date.now(), storeUrl: meta.store_url || "" }, null, 2), 0o644)
   const idx = readIndex()
-  const entry = entryFor(dest, owner, meta.name, JSON.parse(fs.readFileSync(path.join(dest, "install.json"), "utf8")))
+  const entry = entryFor(dest, owner, name, JSON.parse(fs.readFileSync(path.join(dest, "install.json"), "utf8")))
   idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id))
   writeIndex(idx)
   process.stdout.write(`Installed ${entry.title}: ${entry.commands.map((c: any) => c.title).join(", ")}\n`)
@@ -93,6 +95,7 @@ function extRemove(spec: string) {
   const idx = readIndex()
   const e = idx.extensions.find((x) => x.id === spec || x.name === spec)
   if (!e) throw new Error(`not installed: ${spec}`)
+  assertInsideExtDir(e.dir)
   fs.rmSync(e.dir, { recursive: true, force: true })
   idx.extensions = idx.extensions.filter((x) => x.id !== e.id)
   writeIndex(idx)

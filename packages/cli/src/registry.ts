@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { EXT_DIR, INDEX_FILE } from "./paths"
 import { scan } from "./compat"
+import { atomicWrite } from "./fsio"
 
 export interface IndexEntry {
   id: string; owner: string; name: string; title: string; description: string; icon: string; dir: string
@@ -20,9 +21,7 @@ export function readIndex(): { version: number; extensions: IndexEntry[] } {
 
 export function writeIndex(idx: { version: number; extensions: IndexEntry[] }) {
   fs.mkdirSync(EXT_DIR, { recursive: true })
-  const tmp = INDEX_FILE + ".tmp"
-  fs.writeFileSync(tmp, JSON.stringify(idx, null, 2) + "\n")
-  fs.renameSync(tmp, INDEX_FILE)
+  atomicWrite(INDEX_FILE, JSON.stringify(idx, null, 2) + "\n", 0o644)
 }
 
 export function entryFor(dir: string, owner: string, name: string, install: any): IndexEntry {
