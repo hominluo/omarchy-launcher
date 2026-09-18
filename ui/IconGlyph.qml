@@ -6,13 +6,16 @@ import qs.Commons
 //   app   -> themed application icon via the shell's app library
 //   glyph -> Nerd Font glyph
 //   emoji -> emoji text
-//   image -> any Image source
+//   image -> a local Image source (file://, data:, image:)
+//   remote -> an http(s) image, fetched by the sidecar and shown from its cache
 //   swatch -> a colour square (value is a CSS colour)
 Item {
   id: root
   property string kind: ""
   property string value: ""
   property var iconResolver: null
+  // Where the sidecar cached a remote image, once it has; "" until then.
+  property string remotePath: ""
   property color foreground: Color.menu.text
   property string fontFamily: Style.font.menuFamily
   property real size: Style.space(22)
@@ -22,9 +25,21 @@ Item {
 
   property string tint: ""
   property string mask: ""
-  readonly property bool isImage: kind === "app" || kind === "image"
+  readonly property bool isImage: kind === "app" || kind === "image" || (kind === "remote" && remotePath !== "")
   readonly property bool isSwatch: kind === "swatch"
-  readonly property string glyphText: kind === "raycast-icon" ? (root.iconResolver && typeof root.iconResolver.raycastGlyph === "function" ? root.iconResolver.raycastGlyph(root.value) : "󰘔") : root.value
+  readonly property string glyphText: kind === "raycast-icon" ? (root.iconResolver && typeof root.iconResolver.raycastGlyph === "function" ? root.iconResolver.raycastGlyph(root.value) : "󰘔") : (kind === "remote" ? "󰋩" : root.value)
+
+  function resolveRemote() {
+    root.remotePath = ""
+    if (root.kind !== "remote" || !root.iconResolver || typeof root.iconResolver.fetchImage !== "function") return
+    var wanted = root.value
+    root.iconResolver.fetchImage(wanted).then(function(path) {
+      if (root.value === wanted && root.kind === "remote") root.remotePath = "file://" + String(path)
+    }, function() {})
+  }
+  onValueChanged: resolveRemote()
+  onKindChanged: resolveRemote()
+  Component.onCompleted: resolveRemote()
 
   Image {
     id: image
@@ -40,6 +55,7 @@ Item {
     source: {
       if (root.kind === "app") return root.iconResolver ? root.iconResolver.iconSource(root.value) : ""
       if (root.kind === "image") return root.value
+      if (root.kind === "remote") return root.remotePath
       return ""
     }
   }

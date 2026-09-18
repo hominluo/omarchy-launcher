@@ -14,7 +14,7 @@ keycodes (code:10..19) because Omarchy registers those by keycode.
   hotkeys.py --apply    write it (backup first) and reload Hyprland
   hotkeys.py --remove   drop the block
 """
-import json, os, re, shutil, subprocess, sys, time
+import glob, json, os, re, shutil, subprocess, sys, tempfile, time
 
 PLUGIN_ID = "io.github.hominluo.launcher"
 HOME = os.path.expanduser("~")
@@ -104,8 +104,30 @@ def main(argv):
         print("hotkeys: bindings.lua already up to date")
         return 0
     shutil.copy2(BINDINGS, f"{BINDINGS}.bak.{int(time.time())}")
-    with open(BINDINGS, "w") as f:
-        f.write(out)
+    # Backups accumulate on every change; keep the three newest.
+    for old in sorted(glob.glob(f"{BINDINGS}.bak.*"))[:-3]:
+        try:
+            os.unlink(old)
+        except OSError:
+            pass
+    # Written beside the file and renamed into place: a crash mid-write
+    # leaves the old bindings intact, and nothing writes through a link
+    # planted at the temp name. A bindings.lua that is itself a symlink (a
+    # dotfiles checkout) keeps being one: the real file is what is replaced.
+    target = os.path.realpath(BINDINGS)
+    fd, tmp = tempfile.mkstemp(prefix=".bindings.lua.", dir=os.path.dirname(target))
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(out)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     errors = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True).stdout.strip()
     if errors and "No config errors" not in errors:

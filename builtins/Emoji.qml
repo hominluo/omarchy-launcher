@@ -83,6 +83,7 @@ BuiltinHost {
   FileView {
     id: recentsFile
     path: host.recentsPath
+    atomicWrites: true
     printErrors: false
     onLoaded: { try { var d = JSON.parse(text()); host.recents = Array.isArray(d) ? d : [] } catch (e) { host.recents = [] } }
     onLoadFailed: host.recents = []

@@ -57,3 +57,24 @@ test("actions normalize with defaults", () => {
   assert.equal(p.sections[0].actions[0].kind, "callback")
   assert.equal(p.sections[0].actions[1].style, "destructive")
 })
+
+test("remote images are their own kind, never a plain image source", () => {
+  assert.equal(VM.iconSpec("https://example.com/a.png").kind, "remote")
+  assert.equal(VM.iconSpec("HTTP://example.com/a.png").kind, "remote")
+  assert.equal(VM.iconSpec("file:///tmp/a.png").kind, "image")
+  assert.equal(VM.iconSpec("/tmp/a.png").kind, "image")
+  assert.equal(VM.iconSpec({ source: "https://example.com/a.png", tintColor: "#fff" }).kind, "remote")
+})
+
+test("markdown keeps local images and turns remote ones into links", () => {
+  const md = "# T\n![alt](https://x/y.png)\n![](https://x/z.png \"t\")\n![local](file:///tmp/a.png)\n![d](data:image/png;base64,AAAA)\n<img src=\"https://x/q.png\">\n![r][ref]\n"
+  const out = VM.stripRemoteImages(md)
+  assert.ok(out.includes("[alt](https://x/y.png)"))
+  assert.ok(out.includes("[https://x/z.png](https://x/z.png)"))
+  assert.ok(out.includes("![local](file:///tmp/a.png)"))
+  assert.ok(out.includes("[d]"))
+  assert.ok(!out.includes("data:image"))
+  assert.ok(!out.includes("<img"))
+  assert.ok(out.includes("[r][ref]"))
+  assert.ok(!out.includes("![alt]"))
+})

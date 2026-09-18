@@ -10,7 +10,20 @@ export interface SerializeContext {
 
 let autoId = 0
 
-function str(v: any): string { return v === undefined || v === null ? "" : String(v) }
+// Everything an extension renders is bounded before it crosses into the
+// shell process: a view is a few thousand rows and a few hundred kilobytes
+// of text at most, whatever the extension tried to hand over.
+export const CAP = {
+  text: 512, markdown: 256 * 1024, items: 2000, sections: 100, keywords: 50, accessories: 8,
+  actions: 100, metadata: 200, fields: 200, dropdown: 2000, menubar: 500, value: 64 * 1024,
+}
+
+function str(v: any, max = CAP.text): string { return v === undefined || v === null ? "" : String(v).slice(0, max) }
+
+// A form value may be anything JSON; strings are bounded, nothing else is touched.
+function bounded(v: any): any { return typeof v === "string" ? v.slice(0, CAP.value) : v }
+
+function capList<T>(items: T[], max: number): T[] { return items.length > max ? items.slice(0, max) : items }
 
 function isElementInstance(x: any): x is Instance { return x && typeof x === "object" && typeof x.t === "string" }
 
@@ -127,7 +140,9 @@ function actionPanel(inst: Instance | null, ctx: SerializeContext): any {
   }
   walk(inst.c, null)
   flush()
-  return { title: str(inst.p.title), sections }
+  let budget = CAP.actions
+  for (const section of sections) { section.actions = capList(section.actions, Math.max(0, budget)); budget -= section.actions.length }
+  return { title: str(inst.p.title), sections: sections.filter((x) => x.actions.length) }
 }
 
 // ---- metadata
@@ -140,6 +155,7 @@ function metadata(inst: Instance | null, ctx: SerializeContext): any[] {
     else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target) })
     else if (c.t === "metadata-taglist") out.push({ kind: "tags", title: str(c.p.title), tags: c.c.filter((t) => t.t === "metadata-tag").map((t) => ({ text: str(t.p.text), color: t.p.color ? color(t.p.color, ctx) : "", icon: image(t.p.icon, ctx), callbackId: t.p.onAction || null })) })
     else if (c.t === "metadata-separator") out.push({ kind: "separator" })
+    if (out.length >= CAP.metadata) break
   }
   return out
 }
@@ -159,10 +175,10 @@ function listItem(inst: Instance, ctx: SerializeContext, index: number): any {
     title: typeof p.title === "object" && p.title ? str(p.title.value) : str(p.title),
     subtitle: typeof p.subtitle === "object" && p.subtitle ? str(p.subtitle.value) : str(p.subtitle),
     icon: image(p.icon, ctx),
-    keywords: Array.isArray(p.keywords) ? p.keywords.map(str) : [],
-    accessories: accessories(p.accessories, ctx),
+    keywords: Array.isArray(p.keywords) ? capList(p.keywords, CAP.keywords).map((k: any) => str(k)) : [],
+    accessories: capList(accessories(p.accessories, ctx) || [], CAP.accessories),
     actions: actionPanel(childOf(inst, "action-panel"), ctx),
-    detail: detailInst ? { markdown: str(detailInst.p.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
+    detail: detailInst ? { markdown: str(detailInst.p.markdown, CAP.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
     quickLook: p.quickLook ? { path: str(p.quickLook.path), name: str(p.quickLook.name) } : null
   }
   return item
@@ -179,7 +195,7 @@ function gridItem(inst: Instance, ctx: SerializeContext, index: number): any {
     id: str(p.id || ("g" + index)),
     title: str(p.title),
     subtitle: str(p.subtitle),
-    keywords: Array.isArray(p.keywords) ? p.keywords.map(str) : [],
+    keywords: Array.isArray(p.keywords) ? capList(p.keywords, CAP.keywords).map((k: any) => str(k)) : [],
     content,
     accessory: p.accessory ? { icon: image(p.accessory.icon, ctx), text: str(p.accessory.text), tooltip: str(p.accessory.tooltip) } : null,
     actions: actionPanel(childOf(inst, "action-panel"), ctx)
@@ -190,10 +206,12 @@ function dropdown(inst: Instance | null, ctx: SerializeContext): any {
   if (!inst) return null
   const sections: any[] = []
   let loose: any[] = []
-  const item = (c: Instance) => ({ value: str(c.p.value), title: str(c.p.title), icon: image(c.p.icon, ctx), keywords: Array.isArray(c.p.keywords) ? c.p.keywords.map(str) : [] })
+  const item = (c: Instance) => ({ value: str(c.p.value), title: str(c.p.title), icon: image(c.p.icon, ctx), keywords: Array.isArray(c.p.keywords) ? capList(c.p.keywords, CAP.keywords).map((k: any) => str(k)) : [] })
+  let budget = CAP.dropdown
   for (const c of inst.c) {
-    if (c.t === "dropdown-item") loose.push(item(c))
-    else if (c.t === "dropdown-section") { if (loose.length) { sections.push({ title: "", items: loose }); loose = [] } sections.push({ title: str(c.p.title), items: c.c.filter((x) => x.t === "dropdown-item").map(item) }) }
+    if (budget <= 0) break
+    if (c.t === "dropdown-item") { loose.push(item(c)); budget-- }
+    else if (c.t === "dropdown-section") { if (loose.length) { sections.push({ title: "", items: loose }); loose = [] } const items = capList(c.c.filter((x) => x.t === "dropdown-item"), budget).map(item); budget -= items.length; sections.push({ title: str(c.p.title), items }) }
   }
   if (loose.length) sections.push({ title: "", items: loose })
   return { id: str(inst.p.id || "dropdown"), tooltip: str(inst.p.tooltip), placeholder: str(inst.p.placeholder), value: inst.p.value !== undefined ? str(inst.p.value) : undefined, defaultValue: inst.p.defaultValue !== undefined ? str(inst.p.defaultValue) : undefined, storeValue: inst.p.storeValue === true, sections, handlers: { change: inst.p.onChange || null, searchText: inst.p.onSearchTextChange || null }, isLoading: inst.p.isLoading === true, filtering: inst.p.filtering }
@@ -213,10 +231,12 @@ function collection(inst: Instance, ctx: SerializeContext, itemType: string, map
   let actions: any = null
   const flush = () => { if (loose.length) { sections.push({ id: "s" + sections.length, title: "", items: loose }); loose = [] } }
   for (const c of inst.c) {
+    if (n >= CAP.items || sections.length >= CAP.sections) break
     if (c.t === itemType) loose.push(mapItem(c, ctx, n++))
     else if (c.t === itemType.replace("-item", "-section")) {
       flush()
-      sections.push({ id: str(c.p.id || ("s" + sections.length)), title: str(c.p.title), subtitle: str(c.p.subtitle), columns: c.p.columns, aspectRatio: c.p.aspectRatio, inset: c.p.inset, fit: c.p.fit, items: c.c.filter((x) => x.t === itemType).map((x) => mapItem(x, ctx, n++)) })
+      const kids = capList(c.c.filter((x) => x.t === itemType), Math.max(0, CAP.items - n))
+      sections.push({ id: str(c.p.id || ("s" + sections.length)), title: str(c.p.title), subtitle: str(c.p.subtitle), columns: c.p.columns, aspectRatio: c.p.aspectRatio, inset: c.p.inset, fit: c.p.fit, items: kids.map((x) => mapItem(x, ctx, n++)) })
     }
     else if (c.t === "empty-view") empty = emptyView(c, ctx)
     else if (c.t === "dropdown") accessory = dropdown(c, ctx)
@@ -270,7 +290,7 @@ function grid(inst: Instance, ctx: SerializeContext): any {
 
 function detail(inst: Instance, ctx: SerializeContext): any {
   const p = inst.p
-  return { id: ctx.viewId, type: "detail", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, markdown: str(p.markdown), metadata: metadata(childOf(inst, "metadata"), ctx), actions: actionPanel(childOf(inst, "action-panel"), ctx) }
+  return { id: ctx.viewId, type: "detail", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, markdown: str(p.markdown, CAP.markdown), metadata: metadata(childOf(inst, "metadata"), ctx), actions: actionPanel(childOf(inst, "action-panel"), ctx) }
 }
 
 const FORM_KINDS: Record<string, string> = { "form-textfield": "text", "form-password": "password", "form-textarea": "textarea", "form-checkbox": "checkbox", "form-datepicker": "date", "form-dropdown": "dropdown", "form-tagpicker": "tags", "form-filepicker": "file", "form-separator": "separator", "form-description": "description", "form-linkaccessory": "link" }
@@ -284,18 +304,21 @@ function form(inst: Instance, ctx: SerializeContext): any {
     if (c.t === "action-panel") { actions = actionPanel(c, ctx); continue }
     const kind = FORM_KINDS[c.t]
     if (!kind) continue
+    if (fields.length >= CAP.fields) break
     const f: any = { id: str(c.p.id || ("f" + fields.length)), field: kind, title: str(c.p.title), info: str(c.p.info), error: str(c.p.error), placeholder: str(c.p.placeholder), autoFocus: c.p.autoFocus === true, storeValue: c.p.storeValue === true, handlers: { change: c.p.onChange || null, focus: c.p.onFocus || null, blur: c.p.onBlur || null } }
     if (kind === "date") { f.value = dateValue(c.p.value); f.defaultValue = dateValue(c.p.defaultValue); f.type = c.p.type === "date" ? "date" : "dateTime"; f.min = dateValue(c.p.min); f.max = dateValue(c.p.max) }
-    else { if (c.p.value !== undefined) f.value = c.p.value; if (c.p.defaultValue !== undefined) f.defaultValue = c.p.defaultValue }
+    else { if (c.p.value !== undefined) f.value = bounded(c.p.value); if (c.p.defaultValue !== undefined) f.defaultValue = bounded(c.p.defaultValue) }
     if (kind === "checkbox") f.label = str(c.p.label)
-    if (kind === "description") f.text = str(c.p.text)
+    if (kind === "description") f.text = str(c.p.text, CAP.value)
     if (kind === "textarea") f.enableMarkdown = c.p.enableMarkdown === true
     if (kind === "dropdown" || kind === "tags") {
       const items: any[] = []
       const item = (x: Instance) => ({ value: str(x.p.value), title: str(x.p.title), icon: image(x.p.icon, ctx) })
+      let budget = CAP.dropdown
       for (const x of c.c) {
-        if (x.t === "dropdown-item") items.push(item(x))
-        else if (x.t === "dropdown-section") items.push({ title: str(x.p.title), items: x.c.filter((y) => y.t === "dropdown-item").map(item) })
+        if (budget <= 0) break
+        if (x.t === "dropdown-item") { items.push(item(x)); budget-- }
+        else if (x.t === "dropdown-section") { const kids = capList(x.c.filter((y) => y.t === "dropdown-item"), budget).map(item); budget -= kids.length; items.push({ title: str(x.p.title), items: kids }) }
       }
       f.items = items
       f.filtering = c.p.filtering
@@ -308,9 +331,11 @@ function form(inst: Instance, ctx: SerializeContext): any {
 }
 
 function menubar(inst: Instance, ctx: SerializeContext): any {
+  let budget = CAP.menubar
   const items = (children: Instance[]): any[] => {
     const out: any[] = []
     for (const c of children) {
+      if (--budget < 0) break
       if (c.t === "menubar-item") out.push({ kind: "item", id: str(c.p.onAction || ("m" + (++autoId))), title: str(c.p.title), subtitle: str(c.p.subtitle), icon: image(c.p.icon, ctx), tooltip: str(c.p.tooltip), shortcut: shortcut(c.p.shortcut), callbackId: c.p.onAction || null })
       else if (c.t === "menubar-submenu") out.push({ kind: "submenu", title: str(c.p.title), icon: image(c.p.icon, ctx), items: items(c.c) })
       else if (c.t === "menubar-section") out.push({ kind: "section", title: str(c.p.title), items: items(c.c) })

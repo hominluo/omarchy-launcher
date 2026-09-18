@@ -13,21 +13,26 @@ arg="${2:-}"
 d() { hyprctl dispatch "$@" >/dev/null; }
 
 # Geometry of the focused window before a placement, so "Restore Previous
-# Size" can put it back (one slot per window address, in the runtime dir).
-state_dir="${XDG_RUNTIME_DIR:-/tmp}/omarchy-launcher/wm"
+# Size" can put it back (one slot per window address, in the private
+# per-user runtime dir — never a shared temp dir, where another user could
+# plant the file first).
+[[ -n ${XDG_RUNTIME_DIR:-} ]] || { echo "wm.sh: XDG_RUNTIME_DIR is not set" >&2; exit 1; }
+state_dir="$XDG_RUNTIME_DIR/omarchy-launcher/wm"
+addr_ok() { [[ $1 =~ ^0x[0-9a-f]{1,16}$ ]]; }
 save_geometry() {
   local win
   win=$(hyprctl -j activewindow 2>/dev/null) || return 0
   local addr
   addr=$(jq -r '.address // empty' <<<"$win")
-  [[ -n $addr ]] || return 0
-  mkdir -p "$state_dir"
+  addr_ok "$addr" || return 0
+  mkdir -p "$state_dir" && chmod 700 "$state_dir"
   jq -c '{floating: .floating, at: .at, size: .size}' <<<"$win" >"$state_dir/${addr#0x}.json"
 }
 restore_geometry() {
   local addr
   addr=$(hyprctl -j activewindow 2>/dev/null | jq -r '.address // empty')
-  [[ -n $addr && -f "$state_dir/${addr#0x}.json" ]] || { echo "wm.sh: nothing to restore" >&2; exit 1; }
+  addr_ok "$addr" || { echo "wm.sh: nothing to restore" >&2; exit 1; }
+  [[ -f "$state_dir/${addr#0x}.json" ]] || { echo "wm.sh: nothing to restore" >&2; exit 1; }
   local floating x y w h
   read -r floating x y w h < <(jq -r '[.floating, .at[0], .at[1], .size[0], .size[1]] | @sh' "$state_dir/${addr#0x}.json" | tr -d "'")
   if [[ $floating == "true" ]]; then

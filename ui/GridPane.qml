@@ -246,7 +246,7 @@ Item {
                 iconResolver: pane.iconResolver
                 foreground: cell.hasCursor ? pane.selectedText : pane.foreground
                 fontFamily: pane.fontFamily
-                size: cell.info.kind === "image" || cell.info.kind === "app" ? Math.min(tile.width, tile.height) - pane.insetPx * 2 : Math.min(tile.width, tile.height) * 0.5
+                size: cell.info.kind === "image" || cell.info.kind === "app" || cell.info.kind === "remote" ? Math.min(tile.width, tile.height) - pane.insetPx * 2 : Math.min(tile.width, tile.height) * 0.5
               }
             }
 

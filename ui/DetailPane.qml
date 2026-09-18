@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import "../lib/ViewModel.js" as VM
 
 // Markdown detail plus an optional metadata column, used both as the right
 // half of a split list and as a full Detail view.
@@ -7,6 +8,7 @@ Item {
   id: pane
   property string markdown: ""
   property string image: ""
+  property var service: null
   property var metadata: []
   property bool isLoading: false
   property color foreground: Color.menu.text
@@ -35,12 +37,13 @@ Item {
       Image {
         id: picture
         width: parent.width
-        visible: pane.image.length > 0
+        // Only a local file: a remote picture would be fetched and decoded by the shell.
+        visible: pane.image.indexOf("file://") === 0 || pane.image.charAt(0) === "/"
         height: visible ? Math.min(implicitHeight * (width / Math.max(1, implicitWidth)), flick.height * 0.7) : 0
         fillMode: Image.PreserveAspectFit
         asynchronous: true
         cache: false
-        source: pane.image
+        source: visible ? pane.image : ""
         sourceSize.width: 1600
         horizontalAlignment: Image.AlignLeft
       }
@@ -49,14 +52,14 @@ Item {
         id: body
         width: parent.width
         visible: pane.markdown.length > 0
-        text: pane.markdown
+        text: VM.stripRemoteImages(pane.markdown)
         textFormat: Text.MarkdownText
         wrapMode: Text.Wrap
         color: pane.foreground
         font.family: pane.fontFamily
         font.pixelSize: Style.font.body
         linkColor: Color.accent
-        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+        onLinkActivated: function(link) { if (!pane.service || !pane.service.openExternal(link, "")) console.warn("launcher: blocked link", String(link).slice(0, 120)) }
       }
 
       Rectangle {
@@ -118,7 +121,7 @@ Item {
                 anchors.fill: parent
                 enabled: meta.kind === "link" && !!meta.target
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: Qt.openUrlExternally(String(meta.target))
+                onClicked: { if (!pane.service || !pane.service.openExternal(String(meta.target), "")) console.warn("launcher: blocked link", String(meta.target).slice(0, 120)) }
               }
             }
           }

@@ -1,9 +1,14 @@
 // Sidecar entry. Main thread: NDJSON transport to omarchy-shell, one worker
 // per command session, routing by session id. Worker thread: see worker.ts.
 import { isMainThread, Worker, workerData } from "node:worker_threads"
-import { Transport } from "./transport"
+import { Transport, MAX_FRAME } from "./transport"
 import { PROTOCOL_VERSION, LoadParams } from "./protocol"
 import * as ai from "./ai/provider"
+import { fetchImage } from "./images"
+
+// A streamed AI answer is kept in memory for the caller; a provider that
+// never stops is cut off here.
+const MAX_AI_TEXT = 1024 * 1024
 
 if (!isMainThread) {
   require("./worker").runWorker(workerData)
@@ -61,10 +66,14 @@ function main() {
           for await (const chunk of ai.stream(params.messages || [], { model: params.model, creativity: params.creativity, system: params.system, signal: ctrl.signal })) {
             text += chunk
             transport.notify("ai.chunk", { id: params.id, text: chunk })
+            if (text.length > MAX_AI_TEXT) { text += "\n[truncated]"; ctrl.abort(); break }
           }
         } finally { aiAborts.delete(String(params.id)) }
         return { text }
       }
+      case "image.fetch":
+        // Remote images for the shell: fetched here, bounded and sniffed (see images.ts).
+        return { path: await fetchImage(String(params && params.url || "")) }
       default:
         throw new Error("unknown method " + method)
     }
@@ -116,6 +125,21 @@ function main() {
         // AI requests from extensions are served here, not by the shell.
         if (msg && msg.method === "ai.ask" && msg.id !== undefined) { serveAiAsk(worker, msg); return }
         if (msg && msg.method === "ai.abort") { const c = aiAborts.get(String(msg.params && msg.params.id)); if (c) c.abort(); return }
+        // One frame from a worker must fit the shell's parser: a view past
+        // the limit ends the session with a reason instead of a wedged shell.
+        const size = frameSize(msg)
+        if (size > MAX_FRAME) {
+          if (msg && msg.method === "ui.render") {
+            log(`[${params.extensionId}] view too large (${size} bytes); ending session`)
+            transport.notify("manager.crash", { s: params.s, reason: `view too large (> ${Math.round(MAX_FRAME / (1024 * 1024))} MiB)`, stack: "" })
+            unload(params.s, true)
+          } else if (msg && msg.id !== undefined && msg.method !== undefined) {
+            worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "request too large" } } })
+          } else {
+            log(`[${params.extensionId}] dropped an oversized ${msg && msg.method || "message"} (${size} bytes)`)
+          }
+          return
+        }
         transport.write(msg)
         return
       }
@@ -140,15 +164,20 @@ function main() {
     })
   }
 
+  function frameSize(msg: any): number {
+    try { return Buffer.byteLength(JSON.stringify(msg)) } catch { return 0 }
+  }
+
   async function serveAiAsk(worker: Worker, msg: any) {
     const p = msg.params || {}
     const ctrl = new AbortController()
     aiAborts.set(String(p.id), ctrl)
     let text = ""
     try {
-      for await (const chunk of ai.stream([{ role: "user", content: String(p.prompt || "") }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
+      for await (const chunk of ai.stream([{ role: "user", content: String(p.prompt || "").slice(0, MAX_AI_TEXT) }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
         text += chunk
         worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method: "ai.chunk", params: { id: p.id, text: chunk } } })
+        if (text.length > MAX_AI_TEXT) { text += "\n[truncated]"; ctrl.abort(); break }
       }
       worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, result: { text } } })
     } catch (e: any) {
@@ -176,7 +205,7 @@ function main() {
     version: "0.1.0",
     node: process.version,
     pid: process.pid,
-    capabilities: ["view", "no-view", "oauth", "ai"],
+    capabilities: ["view", "no-view", "oauth", "ai", "images"],
     ai: ai.configuredProviders()
   })
 }

@@ -32,9 +32,17 @@ BuiltinHost {
       .replace(/\{argument[^}]*\}/gi, encodeURIComponent(q))
   }
 
+  function byId(id) {
+    for (var i = 0; i < host.links.length; i++) if (String(host.links[i].id) === String(id)) return host.links[i]
+    return null
+  }
+
+  // The resolved link is one argument to one program; the typed query is
+  // URL-inserted only and never sees a shell.
   function openLink(link, query) {
     var url = resolve(link, query)
-    if (link.openWith) Quickshell.execDetached(["bash", "-lc", "uwsm-app -- gtk-launch " + JSON.stringify(String(link.openWith) + ".desktop") + " " + JSON.stringify(url)])
+    var ow = String(link.openWith || "").replace(/\.desktop$/, "")
+    if (ow !== "" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ow)) Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", ow + ".desktop", url])
     else Quickshell.execDetached(["xdg-open", url])
   }
 
@@ -229,6 +237,7 @@ BuiltinHost {
     id: file
     path: host.linksPath
     watchChanges: true
+    atomicWrites: true
     printErrors: false
     onLoaded: host.load(text())
     onLoadFailed: {

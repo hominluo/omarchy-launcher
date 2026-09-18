@@ -26,7 +26,7 @@ rl.on("line", (line) => {
       command: { name: command, mode, title: command }, entrypoint: path.join(extDir, command + ".js"),
       preferences: {}, arguments: {}, launchType: "userInitiated",
       env: { appearance: "dark", textSize: "medium", isDevelopment: false },
-      paths: { assets: path.join(extDir, "assets"), support: "/tmp/claude-1000/-home-homin-Github-Omarchy/eb8361ca-527e-41e2-94aa-1ff911377fdc/scratchpad/ext-support" }
+      paths: { assets: path.join(extDir, "assets"), support: require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "ext-support-")) }
     })
     return
   }

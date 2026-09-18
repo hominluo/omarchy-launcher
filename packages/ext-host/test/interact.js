@@ -16,7 +16,7 @@ rl.on("line", (line) => {
   const msg = JSON.parse(line)
   if (msg.method === "host.hello") {
     request("manager.hello", { protocol: 1 })
-    request("manager.load", { s: "s1", extensionId: "test/ticker", extensionDir: extDir, command: { name: "ticker", mode: "view", title: "Ticker" }, entrypoint: path.join(extDir, "ticker.js"), preferences: {}, arguments: {}, launchType: "userInitiated", env: { appearance: "dark", textSize: "medium", isDevelopment: false }, paths: { assets: extDir + "/assets", support: "/tmp/claude-1000/-home-homin-Github-Omarchy/eb8361ca-527e-41e2-94aa-1ff911377fdc/scratchpad/ext-support" } })
+    request("manager.load", { s: "s1", extensionId: "test/ticker", extensionDir: extDir, command: { name: "ticker", mode: "view", title: "Ticker" }, entrypoint: path.join(extDir, "ticker.js"), preferences: {}, arguments: {}, launchType: "userInitiated", env: { appearance: "dark", textSize: "medium", isDevelopment: false }, paths: { assets: extDir + "/assets", support: require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "ext-support-")) } })
     return
   }
   if (msg.method === "ui.render") {
