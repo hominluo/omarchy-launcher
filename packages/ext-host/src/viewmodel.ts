@@ -14,7 +14,7 @@ let autoId = 0
 // shell process: a view is a few thousand rows and a few hundred kilobytes
 // of text at most, whatever the extension tried to hand over.
 export const CAP = {
-  text: 512, markdown: 256 * 1024, items: 2000, sections: 100, keywords: 50, accessories: 8,
+  text: 512, url: 8 * 1024, markdown: 256 * 1024, items: 2000, sections: 100, keywords: 50, accessories: 8,
   actions: 100, metadata: 200, fields: 200, dropdown: 2000, menubar: 500, value: 64 * 1024,
 }
 
@@ -29,14 +29,15 @@ function isElementInstance(x: any): x is Instance { return x && typeof x === "ob
 
 export function image(v: any, ctx: SerializeContext): any {
   if (v === undefined || v === null || v === "") return null
-  if (typeof v === "string") return imageSource(v, ctx)
+  if (typeof v === "string") return imageSource(str(v, CAP.value), ctx)
   if (typeof v === "object") {
     if (v.fileIcon) return "file-icon://" + str(v.fileIcon)
     if (v.light !== undefined || v.dark !== undefined) return image(ctx.appearance === "dark" && v.dark !== undefined ? v.dark : v.light, ctx)
     if (v.source !== undefined) {
       const src = typeof v.source === "object" && v.source && (v.source.light !== undefined || v.source.dark !== undefined)
         ? (ctx.appearance === "dark" && v.source.dark !== undefined ? v.source.dark : v.source.light) : v.source
-      const out: any = { source: imageSource(str(src), ctx) }
+      // A data: URI or a signed CDN link is far longer than any label.
+      const out: any = { source: imageSource(str(src, CAP.value), ctx) }
       if (v.tintColor) out.tint = color(v.tintColor, ctx)
       if (v.mask) out.mask = str(v.mask)
       if (v.fallback !== undefined) out.fallback = image(v.fallback, ctx)
@@ -152,7 +153,7 @@ function metadata(inst: Instance | null, ctx: SerializeContext): any[] {
   const out: any[] = []
   for (const c of inst.c) {
     if (c.t === "metadata-label") out.push({ kind: "label", title: str(c.p.title), text: textValue(c.p.text, ctx), icon: image(c.p.icon, ctx) })
-    else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target) })
+    else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target, CAP.url) })
     else if (c.t === "metadata-taglist") out.push({ kind: "tags", title: str(c.p.title), tags: c.c.filter((t) => t.t === "metadata-tag").map((t) => ({ text: str(t.p.text), color: t.p.color ? color(t.p.color, ctx) : "", icon: image(t.p.icon, ctx), callbackId: t.p.onAction || null })) })
     else if (c.t === "metadata-separator") out.push({ kind: "separator" })
     if (out.length >= CAP.metadata) break
@@ -179,7 +180,7 @@ function listItem(inst: Instance, ctx: SerializeContext, index: number): any {
     accessories: capList(accessories(p.accessories, ctx) || [], CAP.accessories),
     actions: actionPanel(childOf(inst, "action-panel"), ctx),
     detail: detailInst ? { markdown: str(detailInst.p.markdown, CAP.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
-    quickLook: p.quickLook ? { path: str(p.quickLook.path), name: str(p.quickLook.name) } : null
+    quickLook: p.quickLook ? { path: str(p.quickLook.path, CAP.url), name: str(p.quickLook.name) } : null
   }
   return item
 }
@@ -324,7 +325,7 @@ function form(inst: Instance, ctx: SerializeContext): any {
       f.filtering = c.p.filtering
     }
     if (kind === "file") { f.allowMultiple = c.p.allowMultipleSelection !== false; f.files = c.p.canChooseFiles !== false; f.directories = c.p.canChooseDirectories === true }
-    if (kind === "link") { f.text = str(c.p.text); f.target = str(c.p.target) }
+    if (kind === "link") { f.text = str(c.p.text); f.target = str(c.p.target, CAP.url) }
     fields.push(f)
   }
   return { id: ctx.viewId, type: "form", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, enableDrafts: p.enableDrafts === true, fields, actions }

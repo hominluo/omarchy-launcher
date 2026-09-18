@@ -121,7 +121,9 @@ async function installSpec(spec: InstallSpec, yes: boolean): Promise<void> {
   const lock = checkLockfile(src)
   const esbuild = esbuildVersion()
   await confirmInstall(spec, manifest, lock, esbuild, yes)
-  npmCi(src, log)
+  // A local checkout is the developer's own working tree: its node_modules
+  // keep their bin links so `npm run dev` still works afterwards.
+  npmCi(src, log, { binLinks: spec.kind === "local" })
   const built = build(src, { lockfileSha256: lock.sha256, esbuildVersion: esbuild }, log)
   const id = `${built.owner}/${built.name}`
   const record: any = {

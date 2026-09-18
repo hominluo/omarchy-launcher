@@ -51,6 +51,17 @@ Security hardening after the second marketplace review.
   stripped. `node packages/<pkg>/build.mjs --check` verifies the committed
   bundles match the sources.
 
+- After review: `open(target, application)` accepts the `.desktop` path
+  `getApplications()` hands out and falls back to the default handler for
+  an unusable app id instead of blocking the target; image sources, link
+  targets and quick-look paths get a URL-sized cap rather than the label
+  cap; `open?view=shell` and `notes-new` never open from a link; a launch
+  that first asks for a required setting keeps its arguments; installing
+  from a local checkout keeps that checkout's bin links; only definitive
+  image failures are remembered for the session; `setup.sh` leaves a
+  `settings.json` it cannot parse alone; window addresses are accepted with
+  or without the `0x` prefix.
+
 ## 1.0.2 — 2026-09-17
 
 Validate install directory names; stop trusting pathnames twice

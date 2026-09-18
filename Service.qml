@@ -1042,11 +1042,20 @@ Item {
     return null
   }
 
+  // The application may arrive as a desktop id, a .desktop file name, or the
+  // path getApplications() handed out; anything that is not one plain id
+  // falls back to the default handler rather than blocking the target.
+  function desktopIdOf(app) {
+    var text = String(app || "").trim()
+    if (text === "" || text === "xdg-open" || text === "/usr/bin/xdg-open") return ""
+    var name = text.split("/").pop().replace(/\.desktop$/, "")
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) ? name : ""
+  }
+
   function openExternal(target, app) {
     var t = root.classifyTarget(target)
     if (!t) { console.warn("launcher: refusing to open", String(target).slice(0, 120)); return false }
-    var desktop = String(app || "").replace(/\.desktop$/, "")
-    if (desktop !== "" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(desktop)) { console.warn("launcher: refusing app id", desktop.slice(0, 60)); return false }
+    var desktop = root.desktopIdOf(app)
     if (desktop !== "") Quickshell.execDetached(["bash", "-c", "uwsm-app -- gtk-launch \"$1\" \"$2\" || xdg-open \"$2\"", "--", desktop + ".desktop", t.value])
     else if (t.kind === "path") Quickshell.execDetached(["bash", "-c", "[[ -e $1 ]] && exec xdg-open \"$1\"", "--", t.value])
     else Quickshell.execDetached(["xdg-open", t.value])
@@ -1138,8 +1147,9 @@ Item {
     for (var j = 0; j < (ext.commands || []).length; j++) if (ext.commands[j].name === commandName) cmd = ext.commands[j]
     if (!cmd) return false
     if (!win) return false
-    // A required setting with no value yet: ask for it first, then launch.
-    if (root.missingRequiredPrefs(ext, cmd).length) { preferencesBuiltin.configureExtension(win, ext, cmd, true); return true }
+    // A required setting with no value yet: ask for it first, then launch
+    // with the very arguments this call carried.
+    if (root.missingRequiredPrefs(ext, cmd).length) { preferencesBuiltin.configureExtension(win, ext, cmd, true, args || {}); return true }
     extensionHost.launch(ext, cmd, win, args || {})
     return true
   }
@@ -1226,9 +1236,14 @@ Item {
       if (!path) throw new Error("unavailable")
       return path
     }, function(e) {
-      var next = ({}); for (var k in root.imageCache) next[k] = root.imageCache[k]
-      next[key] = false
-      root.imageCache = next
+      // Only a verdict about the image itself is worth remembering; a
+      // sidecar that was restarting or a slow CDN gets another try later.
+      var message = String(e && e.message || "")
+      if (/not an image|too large|bad scheme|url too long|http 4\d\d/.test(message)) {
+        var next = ({}); for (var k in root.imageCache) next[k] = root.imageCache[k]
+        next[key] = false
+        root.imageCache = next
+      }
       throw e
     })
   }

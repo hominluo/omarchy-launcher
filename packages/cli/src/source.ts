@@ -199,7 +199,7 @@ export function checkLockfile(src: string): LockReport {
 // npm always reads the checkout's own .npmrc; there is no flag to skip
 // project config. Every key that matters is therefore pinned on the command
 // line, which outranks every config file.
-export function npmCi(src: string, log: Log) {
+export function npmCi(src: string, log: Log, opts: { binLinks?: boolean } = {}) {
   fs.mkdirSync(NPM_CACHE_DIR, { recursive: true })
   // npm insists on two distinct config files; both are empty, so neither the
   // user's ~/.npmrc nor a global one has any say.
@@ -207,7 +207,7 @@ export function npmCi(src: string, log: Log) {
   for (const rc of [userRc, globalRc]) fs.writeFileSync(rc, "", { mode: 0o600 })
   log("Installing dependencies (npm ci, scripts disabled, registry.npmjs.org only)…")
   const args = [
-    "ci", "--ignore-scripts", "--no-bin-links", "--no-audit", "--no-fund", "--loglevel=error", "--no-update-notifier",
+    "ci", "--ignore-scripts", opts.binLinks ? "--bin-links" : "--no-bin-links", "--no-audit", "--no-fund", "--loglevel=error", "--no-update-notifier",
     "--registry=" + REGISTRY, "--strict-ssl=true", "--replace-registry-host=never",
     "--workspaces=false", "--include-workspace-root=false", "--install-links=false", "--foreground-scripts=false",
     "--global=false", "--location=project", "--prefix=" + src, "--cache=" + NPM_CACHE_DIR,
