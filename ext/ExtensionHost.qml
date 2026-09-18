@@ -511,7 +511,8 @@ Item {
       var addr = String(p.id || "")
       // The address and every number land in a hyprctl batch line; only a
       // window address and bounded integers may, never a second dispatcher.
-      if (!/^0x[0-9a-f]{1,16}$/.test(addr)) throw new Error("bad window id")
+      if (!/^(0x)?[0-9a-fA-F]{1,16}$/.test(addr)) throw new Error("bad window id")
+      addr = "0x" + addr.replace(/^0x/, "").toLowerCase()
       var n = function(v) { v = Math.round(Number(v)); if (!isFinite(v)) throw new Error("bad bounds"); return Math.max(-32768, Math.min(32768, v)) }
       var cmds = []
       if (b.size) cmds.push("dispatch resizewindowpixel exact " + n(b.size.width) + " " + n(b.size.height) + ",address:" + addr)

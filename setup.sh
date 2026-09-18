@@ -39,10 +39,14 @@ try:
         data = json.load(handle)
 except FileNotFoundError:
     data = {"version": 1, "hotkey": "SUPER + D", "commands": {}}
-except Exception:
-    data = {}
+except Exception as error:
+    # Someone's aliases, hotkeys and favourites live in here: a file that
+    # does not parse is left exactly as it is, never replaced.
+    sys.stderr.write("setup: %s is not valid JSON (%s); leaving it alone\n" % (path, error))
+    sys.exit(0)
 if not isinstance(data, dict):
-    data = {}
+    sys.stderr.write("setup: %s is not a JSON object; leaving it alone\n" % path)
+    sys.exit(0)
 data.setdefault("version", 1)
 data.setdefault("commands", {})
 if key:

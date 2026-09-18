@@ -133,7 +133,8 @@
       "command"
     ],
     "icon": "󰆍",
-    "handler": "shell"
+    "handler": "shell",
+    "urlOpen": false
   },
   {
     "id": "notes",
@@ -177,7 +178,8 @@
     "handler": "notes",
     "args": {
       "mode": "new"
-    }
+    },
+    "urlOpen": false
   },
   {
     "id": "focus-start",

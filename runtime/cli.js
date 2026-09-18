@@ -654,7 +654,7 @@ function checkLockfile(src) {
   }
   return { file, sha256: sha256File(file), packages };
 }
-function npmCi(src, log2) {
+function npmCi(src, log2, opts = {}) {
   import_node_fs3.default.mkdirSync(NPM_CACHE_DIR, { recursive: true });
   const userRc = import_node_path4.default.join(NPM_CACHE_DIR, "empty-user.npmrc"), globalRc = import_node_path4.default.join(NPM_CACHE_DIR, "empty-global.npmrc");
   for (const rc of [userRc, globalRc]) import_node_fs3.default.writeFileSync(rc, "", { mode: 384 });
@@ -662,7 +662,7 @@ function npmCi(src, log2) {
   const args = [
     "ci",
     "--ignore-scripts",
-    "--no-bin-links",
+    opts.binLinks ? "--bin-links" : "--no-bin-links",
     "--no-audit",
     "--no-fund",
     "--loglevel=error",
@@ -989,7 +989,7 @@ async function installSpec(spec, yes) {
   const lock = checkLockfile(src);
   const esbuild = esbuildVersion();
   await confirmInstall(spec, manifest, lock, esbuild, yes);
-  npmCi(src, log);
+  npmCi(src, log, { binLinks: spec.kind === "local" });
   const built = build(src, { lockfileSha256: lock.sha256, esbuildVersion: esbuild }, log);
   const id = `${built.owner}/${built.name}`;
   const record = {

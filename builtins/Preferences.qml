@@ -311,11 +311,11 @@ BuiltinHost {
 
   // ---- extension preferences (manifest-driven form)
 
-  property var extConfiguring: null     // { ext, cmd, launchAfter }
+  property var extConfiguring: null     // { ext, cmd, launchAfter, launchArgs }
 
-  function configureExtension(win, ext, cmd, launchAfter) {
+  function configureExtension(win, ext, cmd, launchAfter, launchArgs) {
     host.panel = win
-    host.extConfiguring = { ext: ext, cmd: cmd || null, launchAfter: launchAfter === true }
+    host.extConfiguring = { ext: ext, cmd: cmd || null, launchAfter: launchAfter === true, launchArgs: launchArgs || {} }
     host.push(extensionForm(ext, cmd, {}))
   }
 
@@ -367,7 +367,7 @@ BuiltinHost {
     host.toast("success", "Preferences saved", String(c.ext.title || c.ext.name))
     host.extConfiguring = null
     host.pop()
-    if (c.launchAfter && c.cmd && host.panel) Qt.callLater(function() { service.extHost.launch(c.ext, c.cmd, host.panel, {}) })
+    if (c.launchAfter && c.cmd && host.panel) Qt.callLater(function() { service.extHost.launch(c.ext, c.cmd, host.panel, c.launchArgs || {}) })
   }
 
   function open(win, args) {

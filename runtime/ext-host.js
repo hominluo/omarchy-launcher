@@ -416,13 +416,13 @@ function capList(items, max) {
 }
 function image(v, ctx) {
   if (v === void 0 || v === null || v === "") return null;
-  if (typeof v === "string") return imageSource(v, ctx);
+  if (typeof v === "string") return imageSource(str(v, CAP.value), ctx);
   if (typeof v === "object") {
     if (v.fileIcon) return "file-icon://" + str(v.fileIcon);
     if (v.light !== void 0 || v.dark !== void 0) return image(ctx.appearance === "dark" && v.dark !== void 0 ? v.dark : v.light, ctx);
     if (v.source !== void 0) {
       const src = typeof v.source === "object" && v.source && (v.source.light !== void 0 || v.source.dark !== void 0) ? ctx.appearance === "dark" && v.source.dark !== void 0 ? v.source.dark : v.source.light : v.source;
-      const out = { source: imageSource(str(src), ctx) };
+      const out = { source: imageSource(str(src, CAP.value), ctx) };
       if (v.tintColor) out.tint = color(v.tintColor, ctx);
       if (v.mask) out.mask = str(v.mask);
       if (v.fallback !== void 0) out.fallback = image(v.fallback, ctx);
@@ -550,7 +550,7 @@ function metadata(inst, ctx) {
   const out = [];
   for (const c of inst.c) {
     if (c.t === "metadata-label") out.push({ kind: "label", title: str(c.p.title), text: textValue(c.p.text, ctx), icon: image(c.p.icon, ctx) });
-    else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target) });
+    else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target, CAP.url) });
     else if (c.t === "metadata-taglist") out.push({ kind: "tags", title: str(c.p.title), tags: c.c.filter((t) => t.t === "metadata-tag").map((t) => ({ text: str(t.p.text), color: t.p.color ? color(t.p.color, ctx) : "", icon: image(t.p.icon, ctx), callbackId: t.p.onAction || null })) });
     else if (c.t === "metadata-separator") out.push({ kind: "separator" });
     if (out.length >= CAP.metadata) break;
@@ -573,7 +573,7 @@ function listItem(inst, ctx, index) {
     accessories: capList(accessories(p.accessories, ctx) || [], CAP.accessories),
     actions: actionPanel(childOf(inst, "action-panel"), ctx),
     detail: detailInst ? { markdown: str(detailInst.p.markdown, CAP.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
-    quickLook: p.quickLook ? { path: str(p.quickLook.path), name: str(p.quickLook.name) } : null
+    quickLook: p.quickLook ? { path: str(p.quickLook.path, CAP.url), name: str(p.quickLook.name) } : null
   };
   return item;
 }
@@ -755,7 +755,7 @@ function form(inst, ctx) {
     }
     if (kind === "link") {
       f.text = str(c.p.text);
-      f.target = str(c.p.target);
+      f.target = str(c.p.target, CAP.url);
     }
     fields.push(f);
   }
@@ -800,6 +800,7 @@ var init_viewmodel = __esm({
     autoId = 0;
     CAP = {
       text: 512,
+      url: 8 * 1024,
       markdown: 256 * 1024,
       items: 2e3,
       sections: 100,
