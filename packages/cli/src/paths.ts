@@ -12,3 +12,8 @@ export const SUPPORT_DIR = path.join(DATA_DIR, "support")
 export const PREFS_DIR = path.join(CONFIG_DIR, "prefs")
 export const SECRETS_DIR = path.join(DATA_DIR, "secrets")
 export const PLUGIN_ID = "io.github.hominluo.launcher"
+// Where each installed extension came from — written by the CLI only, never
+// inside an extension's own directory (which the extension can rewrite).
+export const ORIGINS_FILE = path.join(DATA_DIR, "origins.json")
+export const SRC_CACHE_DIR = path.join(CACHE_DIR, "src")
+export const NPM_CACHE_DIR = path.join(CACHE_DIR, "npm")

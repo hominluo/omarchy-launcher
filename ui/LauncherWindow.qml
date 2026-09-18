@@ -108,6 +108,13 @@ PanelWindow {
     panel.opened = true
     Qt.callLater(function() { searchBar.focusInput() })
 
+    // A payload from an omarchy-launcher:// link (any web page can send
+    // one) is routed through the service's gate: it may open a view or
+    // prefill a query, and must ask before anything runs.
+    if (payload && payload.origin === "url" && (payload.extension || payload.command) && panel.service && typeof panel.service.openFromUrl === "function") {
+      panel.service.openFromUrl(payload, panel)
+      return
+    }
     if (payload && payload.extension && panel.service) {
       if (!panel.service.launchExtensionCommand(String(payload.extension), String(payload.command || ""), panel, { arguments: payload.arguments || {}, context: payload.context, fallbackText: payload.fallbackText, launchType: payload.launchType }))
         panel.showToast({ style: "failure", title: "Extension command not found", message: payload.extension + "/" + payload.command })
@@ -240,10 +247,11 @@ PanelWindow {
     if (frame && frame.owner && typeof frame.owner.dropdown === "function") frame.owner.dropdown(view.id, view.searchBarAccessory.id, value)
   }
 
-  function confirm(message, confirmText, callback) {
+  function confirm(message, confirmText, callback, opts) {
     confirmDialog.message = String(message || "Are you sure?")
     confirmDialog.confirmText = String(confirmText || "Confirm")
-    confirmDialog.selectedIndex = 1
+    // A prompt raised by a link defaults to Cancel: a stray Enter must not run it.
+    confirmDialog.selectedIndex = opts && opts.defaultCancel ? 0 : 1
     panel.confirmCallback = callback || null
     panel.confirmOpen = true
   }
@@ -335,36 +343,35 @@ PanelWindow {
       case "openInBrowser":
       case "open": {
         var target = String(payload.url || payload.target || "")
-        if (target) {
-          if (payload.app) Quickshell.execDetached(["bash", "-lc", "uwsm-app -- gtk-launch " + JSON.stringify(String(payload.app).replace(/\.desktop$/, "") + ".desktop") + " " + JSON.stringify(target) + " || xdg-open " + JSON.stringify(target)])
-          else Qt.openUrlExternally(target)
-        }
+        if (target && panel.service && !panel.service.openExternal(target, payload.app ? String(payload.app) : ""))
+          panel.showToast({ style: "failure", title: "Blocked link", message: target.slice(0, 80) })
         panel.dismiss()
         after([target])
         return
       }
       case "openWith": {
         var owPath = String(payload.path || "")
-        Quickshell.execDetached(["bash", "-lc", "xdg-open " + JSON.stringify(owPath)])
+        if (panel.service) panel.service.openExternal(owPath, "")
         panel.dismiss()
         after([owPath])
         return
       }
       case "showInFileManager": {
         var sp = String(payload.path || "")
-        Quickshell.execDetached(["bash", "-lc", "nautilus --select " + JSON.stringify(sp) + " 2>/dev/null || xdg-open " + JSON.stringify(sp.replace(/\/[^/]*$/, ""))])
+        if (panel.service) panel.service.revealInFileManager(sp)
         panel.dismiss()
         after([sp])
         return
       }
       case "trash": {
-        var paths = (payload.paths || []).map(String)
-        panel.confirm("Move " + (paths.length === 1 ? paths[0].split("/").pop() : paths.length + " items") + " to the trash?", "Trash", function() { Quickshell.execDetached(["gio", "trash"].concat(paths)); after([paths]) })
+        var paths = (payload.paths || []).map(String).filter(function(x) { return x.charAt(0) === "/" })
+        if (!paths.length) return
+        panel.confirm("Move " + (paths.length === 1 ? paths[0].split("/").pop() : paths.length + " items") + " to the trash?", "Trash", function() { Quickshell.execDetached(["gio", "trash", "--"].concat(paths)); after([paths]) })
         return
       }
       case "toggleQuickLook": {
         var ql = item && item.quickLook ? String(item.quickLook.path || "") : ""
-        if (ql) Quickshell.execDetached(["xdg-open", ql])
+        if (ql && panel.service) panel.service.openExternal(ql, "")
         return
       }
       case "createSnippet":
@@ -733,6 +740,7 @@ PanelWindow {
 
       DetailPane {
         id: fullDetail
+        service: panel.service
         visible: panel.detailView
         anchors.fill: parent
         foreground: panel.foreground
@@ -771,6 +779,7 @@ PanelWindow {
 
       DetailPane {
         id: detailPane
+        service: panel.service
         visible: panel.splitView
         anchors.left: splitSeparator.right
         anchors.right: parent.right

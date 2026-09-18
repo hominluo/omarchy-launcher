@@ -1,6 +1,10 @@
 // NDJSON framing over a readable/writable pair, with request bookkeeping.
 import { RpcMessage, RpcRequest } from "./protocol"
 
+// The largest frame either side will pass on. The shell splits on
+// newlines with no cap of its own, so the bound lives here.
+export const MAX_FRAME = 8 * 1024 * 1024
+
 export class Transport {
   private buffer = ""
   private nextId = 2                     // host uses odd ids, we use even
@@ -46,7 +50,9 @@ export class Transport {
   }
 
   write(msg: any) {
-    this.output.write(JSON.stringify(msg) + "\n")
+    const line = JSON.stringify(msg)
+    if (Buffer.byteLength(line) > MAX_FRAME) { this.log(`dropped an oversized frame (${msg && msg.method || "response"})`); return }
+    this.output.write(line + "\n")
   }
 
   notify(method: string, params?: any) {

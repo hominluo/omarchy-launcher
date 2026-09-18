@@ -27,48 +27,94 @@ while (( $# > 0 )); do
 done
 
 mkdir -p "$CONFIG_DIR" "$HOME/.local/state/omarchy-launcher" "$HOME/.local/share/omarchy-launcher"
-[[ -f $SETTINGS ]] || printf '{\n  "version": 1,\n  "hotkey": "SUPER + D",\n  "commands": {}\n}\n' > "$SETTINGS"
 
-if [[ -n $HOTKEY ]]; then
-  python3 - "$SETTINGS" "$HOTKEY" <<'PY'
-import json, sys
+# settings.json is seeded once and only the hotkey is touched afterwards;
+# every write goes through a temp file and a rename, never a redirect.
+python3 - "$SETTINGS" "$HOTKEY" <<'PY'
+import json, os, sys, tempfile
 path, key = sys.argv[1:3]
+data = None
 try:
-    data = json.load(open(path))
+    with open(path) as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    data = {"version": 1, "hotkey": "SUPER + D", "commands": {}}
 except Exception:
     data = {}
-data["version"] = 1
-data["hotkey"] = key
-json.dump(data, open(path, "w"), indent=2)
-open(path, "a").write("\n")
+if not isinstance(data, dict):
+    data = {}
+data.setdefault("version", 1)
+data.setdefault("commands", {})
+if key:
+    data["hotkey"] = key
+else:
+    data.setdefault("hotkey", "SUPER + D")
+fd, tmp = tempfile.mkstemp(prefix=".settings.json.", dir=os.path.dirname(path))
+with os.fdopen(fd, "w") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\n")
+os.replace(tmp, path)
 PY
-fi
 
 if (( WRITE_HOTKEY )); then
   python3 "$PLUGIN_DIR/bin/hotkeys.py" --apply
 fi
 
-# Register the launcher as the handler for raycast:// and omarchy-launcher://
-# links (extension deeplinks, OAuth redirects) unless another handler exists.
+# Register the launcher as the handler for omarchy-launcher:// links (its
+# own deeplinks and OAuth redirects) unless another handler exists. It is
+# the only scheme the launcher handles: raycast:// links are not ours, and
+# a registration from an older release is removed.
 APPS_DIR="$HOME/.local/share/applications"
+HANDLER="omarchy-launcher-url-handler.desktop"
 mkdir -p "$APPS_DIR"
-cat > "$APPS_DIR/omarchy-launcher-url-handler.desktop" <<DESKTOP
+case "$PLUGIN_DIR" in
+  *[\"\`\$\\]*|*$'\n'*) echo "setup: the plugin path contains characters a .desktop Exec= line cannot carry: $PLUGIN_DIR" >&2; exit 1 ;;
+esac
+desktop_tmp=$(mktemp "$APPS_DIR/.$HANDLER.XXXXXX")
+cat > "$desktop_tmp" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Omarchy Launcher URL Handler
-Exec=$PLUGIN_DIR/bin/launcher url %u
+Exec="$PLUGIN_DIR/bin/launcher" url %u
 NoDisplay=true
 Terminal=false
-MimeType=x-scheme-handler/omarchy-launcher;x-scheme-handler/raycast;x-scheme-handler/com.raycast;
+MimeType=x-scheme-handler/omarchy-launcher;
 DESKTOP
+chmod 644 "$desktop_tmp"
+mv -f "$desktop_tmp" "$APPS_DIR/$HANDLER"
 if command -v xdg-mime >/dev/null 2>&1; then
-  for scheme in x-scheme-handler/omarchy-launcher x-scheme-handler/raycast x-scheme-handler/com.raycast; do
-    current=$(xdg-mime query default "$scheme" 2>/dev/null || true)
-    if [[ -z $current || $current == omarchy-launcher-url-handler.desktop ]]; then
-      xdg-mime default omarchy-launcher-url-handler.desktop "$scheme" 2>/dev/null || true
-    fi
-  done
+  current=$(xdg-mime query default x-scheme-handler/omarchy-launcher 2>/dev/null || true)
+  if [[ -z $current || $current == "$HANDLER" ]]; then
+    xdg-mime default "$HANDLER" x-scheme-handler/omarchy-launcher 2>/dev/null || true
+  fi
 fi
+# Drop this handler from the raycast schemes an older release registered.
+python3 - "$HANDLER" "${XDG_CONFIG_HOME:-$HOME/.config}/mimeapps.list" <<'PY'
+import os, re, sys, tempfile
+handler, path = sys.argv[1:3]
+try:
+    with open(path) as fh:
+        lines = fh.read().split("\n")
+except FileNotFoundError:
+    sys.exit(0)
+changed = False
+out = []
+for line in lines:
+    m = re.match(r"^(x-scheme-handler/(?:raycast|com\.raycast))=(.*)$", line)
+    if m:
+        kept = [h for h in m.group(2).split(";") if h and h != handler]
+        if len(kept) != len([h for h in m.group(2).split(";") if h]):
+            changed = True
+            if not kept:
+                continue
+            line = m.group(1) + "=" + ";".join(kept) + ";"
+    out.append(line)
+if changed:
+    fd, tmp = tempfile.mkstemp(prefix=".mimeapps.list.", dir=os.path.dirname(path) or ".")
+    with os.fdopen(fd, "w") as fh:
+        fh.write("\n".join(out))
+    os.replace(tmp, path)
+PY
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" 2>/dev/null || true
 
 if omarchy plugin list 2>/dev/null | grep -q "^$PLUGIN_ID .*disabled"; then

@@ -1,7 +1,7 @@
 // Filesystem helpers that never trust a pathname twice.
 import fs from "node:fs"
 import path from "node:path"
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { EXT_DIR } from "./paths"
 
 const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs.constants
@@ -36,14 +36,69 @@ export function atomicWrite(file: string, data: string | Buffer, mode = 0o600) {
 // Store metadata and extension manifests decide which directory under
 // EXT_DIR an extension lives in — and is later removed from. Only a plain
 // single path component may become one.
+export const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
 export function safeSegment(value: any, what: string): string {
   const s = String(value ?? "")
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(s)) throw new Error(`${what} "${s}" is not a safe directory name`)
+  if (!SEGMENT.test(s)) throw new Error(`${what} "${s}" is not a safe directory name`)
   return s
 }
 
-// Nothing is ever removed recursively unless it sits strictly inside EXT_DIR.
+export function plainName(value: any): boolean {
+  return typeof value === "string" && SEGMENT.test(value)
+}
+
+// A relative directory inside a checkout (`extensions/hacker-news`): plain
+// segments only, so it can neither climb out nor read as a git option.
+export function safeRelDir(value: any, what: string): string {
+  const s = String(value ?? "").replace(/^\/+|\/+$/g, "")
+  if (!s) throw new Error(`${what} is empty`)
+  const parts = s.split("/")
+  for (const part of parts) safeSegment(part, what)
+  return parts.join("/")
+}
+
+// Text from the store or a manifest that will be printed or shown: no
+// control characters, no bidi overrides, bounded length.
+export function cleanText(value: any, max = 200): string {
+  return String(value ?? "").replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, "").slice(0, max)
+}
+
+export function sha256File(file: string): string {
+  return createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+}
+
+// Nothing is ever removed recursively — or renamed into place — unless it
+// sits strictly inside the real EXT_DIR. Resolved through realpath: a
+// symlinked owner directory planted under EXT_DIR would otherwise pass a
+// purely lexical check and redirect the removal.
 export function assertInsideExtDir(p: string) {
-  const rel = path.relative(EXT_DIR, path.resolve(p))
-  if (!rel || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) throw new Error(`refusing to remove ${p}: not inside ${EXT_DIR}`)
+  const abs = path.resolve(p)
+  let extReal: string, parentReal: string
+  try { extReal = fs.realpathSync(EXT_DIR) } catch { throw new Error(`refusing to touch ${p}: ${EXT_DIR} does not exist`) }
+  try { parentReal = fs.realpathSync(path.dirname(abs)) } catch { throw new Error(`refusing to touch ${p}: its parent does not exist`) }
+  const rel = path.relative(extReal, path.join(parentReal, path.basename(abs)))
+  if (!rel || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) throw new Error(`refusing to touch ${p}: not inside ${EXT_DIR}`)
+  let st: fs.Stats | null = null
+  try { st = fs.lstatSync(abs) } catch (e: any) { if (e.code !== "ENOENT") throw e }
+  if (st && st.isSymbolicLink()) throw new Error(`refusing to touch ${p}: it is a symlink`)
+}
+
+// Copy a tree of regular files. Symlinks, devices and the like are refused
+// outright rather than followed, and the total is capped.
+export function copyTreeNoSymlinks(src: string, dst: string, maxBytes = 50 * 1024 * 1024) {
+  let total = 0
+  const walk = (from: string, to: string) => {
+    fs.mkdirSync(to, { recursive: true })
+    for (const name of fs.readdirSync(from)) {
+      const s = path.join(from, name), d = path.join(to, name)
+      const st = fs.lstatSync(s)
+      if (st.isDirectory()) { walk(s, d); continue }
+      if (!st.isFile()) throw new Error(`${s} is not a regular file; refusing to copy it`)
+      total += st.size
+      if (total > maxBytes) throw new Error(`assets exceed ${Math.round(maxBytes / (1024 * 1024))} MB; refusing to install`)
+      fs.copyFileSync(s, d, fs.constants.COPYFILE_EXCL)
+    }
+  }
+  walk(src, dst)
 }

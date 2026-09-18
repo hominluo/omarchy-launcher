@@ -332,7 +332,7 @@ Item {
         accessories: [{ text: "URL" }],
         data: { url: url },
         actions: { sections: [{ actions: [
-          { id: "open", title: "Open in Browser", icon: "󰖟", run: function(item) { Qt.openUrlExternally(item.data.url); return false } },
+          { id: "open", title: "Open in Browser", icon: "󰖟", run: function(item) { self.openExternal(item.data.url, ""); return false } },
           { id: "copy", title: "Copy URL", icon: "󰆏", run: function(item) { Quickshell.execDetached(["wl-copy", "--", item.data.url]); return false } },
           { id: "quicklink", title: "Create Quicklink…", icon: "󰌹", run: function(item, win) { self.runCommandId("cmd:quicklinks-create", win, { mode: "create", name: Inline.hostOf(item.data.url), link: item.data.url }); return true } }
         ] }] }
@@ -1028,6 +1028,104 @@ Item {
   // Ask for named arguments with a pushed form, then call onDone(values).
   function promptArguments(win, title, defs, onDone) { argumentsBuiltin.prompt(win, title, defs, onDone) }
 
+  // ---- opening things an extension or a link chose ---------------------
+  // Every target goes through one classifier and is handed to a program as
+  // an argument vector; nothing an extension supplies is ever spliced into
+  // a shell string. Only web links, mail links and existing local paths open.
+  function classifyTarget(target) {
+    var t = String(target || "").trim()
+    if (t === "" || t.length > 4096 || /[\x00-\x1f\x7f]/.test(t)) return null
+    if (/^(https?|mailto):/i.test(t)) return { kind: "url", value: t }
+    if (/^file:\/\//i.test(t)) { try { t = decodeURIComponent(t.replace(/^file:\/\/(localhost)?/i, "")) } catch (e) { return null } }
+    if (t.indexOf("~/") === 0) t = root.home + t.slice(1)
+    if (t.charAt(0) === "/") return { kind: "path", value: t }
+    return null
+  }
+
+  function openExternal(target, app) {
+    var t = root.classifyTarget(target)
+    if (!t) { console.warn("launcher: refusing to open", String(target).slice(0, 120)); return false }
+    var desktop = String(app || "").replace(/\.desktop$/, "")
+    if (desktop !== "" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(desktop)) { console.warn("launcher: refusing app id", desktop.slice(0, 60)); return false }
+    if (desktop !== "") Quickshell.execDetached(["bash", "-c", "uwsm-app -- gtk-launch \"$1\" \"$2\" || xdg-open \"$2\"", "--", desktop + ".desktop", t.value])
+    else if (t.kind === "path") Quickshell.execDetached(["bash", "-c", "[[ -e $1 ]] && exec xdg-open \"$1\"", "--", t.value])
+    else Quickshell.execDetached(["xdg-open", t.value])
+    return true
+  }
+
+  function revealInFileManager(target) {
+    var t = root.classifyTarget(target)
+    if (!t || t.kind !== "path") return false
+    Quickshell.execDetached(["bash", "-c", "[[ -e $1 ]] || exit 1; nautilus --select \"$1\" 2>/dev/null || xdg-open \"$(dirname \"$1\")\"", "--", t.value])
+    return true
+  }
+
+  // ---- links from outside -------------------------------------------------
+  // A payload tagged origin:"url" came from an omarchy-launcher:// link, which
+  // any web page can hand us. Nothing with a side effect runs on that say-so
+  // alone: extension launches and quicklinks ask first, views merely open,
+  // and catalog commands are only put in the search box.
+  function openFromUrl(payload, win) {
+    if (payload.extension) { root.confirmExtensionLaunch(String(payload.extension), String(payload.command || ""), payload, win); return }
+    var id = String(payload.command || "")
+    if (id.indexOf("ql:") === 0) { root.confirmQuicklink(id.slice(3), payload.arguments && payload.arguments.query, win); return }
+    if (id !== "") root.runCommandIdFromUrl(id, win, { query: payload.query })
+  }
+
+  // The manifest's argument list is the schema: unknown keys are dropped,
+  // dropdown values must be one the extension declared, and everything is
+  // a bounded string. launchType is always userInitiated.
+  function sanitizeLaunchArgs(cmd, payload) {
+    var out = {}
+    var src = payload && payload.arguments && typeof payload.arguments === "object" ? payload.arguments : {}
+    var declared = cmd && Array.isArray(cmd.arguments) ? cmd.arguments : []
+    for (var i = 0; i < declared.length; i++) {
+      var d = declared[i]
+      if (!d || typeof d.name !== "string") continue
+      var v = src[d.name]
+      if (v === undefined || v === null) continue
+      if (d.type === "dropdown") {
+        var allowed = Array.isArray(d.data) ? d.data : []
+        for (var j = 0; j < allowed.length; j++) if (allowed[j] && String(allowed[j].value) === String(v)) { out[d.name] = String(v); break }
+      } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[d.name] = String(v).slice(0, 4096)
+    }
+    var ctx = payload ? payload.context : undefined
+    try { if (ctx !== undefined && JSON.stringify(ctx).length > 16384) ctx = undefined } catch (e) { ctx = undefined }
+    return { arguments: out, context: ctx, fallbackText: typeof payload.fallbackText === "string" ? payload.fallbackText.slice(0, 4096) : undefined, launchType: "userInitiated" }
+  }
+
+  function confirmExtensionLaunch(extId, cmdName, payload, win) {
+    var ext = root.findExtension(extId)
+    var cmd = null
+    if (ext) for (var j = 0; j < (ext.commands || []).length; j++) if (ext.commands[j].name === cmdName) cmd = ext.commands[j]
+    if (!ext || !cmd || !win) { if (win) win.showToast({ style: "failure", title: "Extension command not found", message: extId + "/" + cmdName }); return }
+    var args = root.sanitizeLaunchArgs(cmd, payload)
+    var keys = Object.keys(args.arguments)
+    var message = "Run \u201c" + String(cmd.title || cmd.name) + "\u201d from " + String(ext.title || ext.name) + "?\nOpened from a link. Extensions run with your full user privileges."
+    if (keys.length) message += "\nArguments: " + JSON.stringify(args.arguments).slice(0, 300)
+    win.confirm(message, "Run", function() { root.launchExtensionCommand(ext.id, cmd.name, win, args) }, { defaultCancel: true })
+  }
+
+  function confirmQuicklink(id, query, win) {
+    var link = quicklinksBuiltin.byId(id)
+    if (!link || !win) { if (win) win.showToast({ style: "failure", title: "Unknown quicklink", message: id }); return }
+    var q = String(query || "").slice(0, 4096)
+    var url = quicklinksBuiltin.resolve(link, q)
+    win.confirm("Open " + url.slice(0, 200) + "?\nOpened from a link.", "Open", function() { quicklinksBuiltin.openLink(link, q); win.dismiss() }, { defaultCancel: true })
+  }
+
+  function runCommandIdFromUrl(commandId, win, args) {
+    var entry = root.entryById(commandId.indexOf(":") >= 0 ? commandId : "cmd:" + commandId)
+    if (!entry) { if (win) win.showToast({ style: "failure", title: "Unknown command", message: commandId }); return }
+    if (entry.kind === "extension") { root.confirmExtensionLaunch(entry.extension.id, entry.command.name, { arguments: {} }, win); return }
+    if (entry.kind === "quicklink") { root.confirmQuicklink(String(entry.id).slice(3), args && args.query, win); return }
+    var raw = entry.raw
+    if (raw && raw.handler && raw.urlOpen !== false && root.handlers[raw.handler]) { root.runCommandId(entry.id, win, args && args.query ? { query: String(args.query) } : {}); return }
+    // A command that executes something (system commands, window actions,
+    // apps, scripts): show it, do not run it.
+    if (win) { win.setSearchText(String(entry.title || "")); win.showToast({ style: "success", title: "Press Enter to run " + String(entry.title || "") }) }
+  }
+
   function findExtension(extId) {
     for (var i = 0; i < root.extensions.length; i++) if (root.extensions[i].id === extId || root.extensions[i].name === extId) return root.extensions[i]
     return null
@@ -1040,6 +1138,8 @@ Item {
     for (var j = 0; j < (ext.commands || []).length; j++) if (ext.commands[j].name === commandName) cmd = ext.commands[j]
     if (!cmd) return false
     if (!win) return false
+    // A required setting with no value yet: ask for it first, then launch.
+    if (root.missingRequiredPrefs(ext, cmd).length) { preferencesBuiltin.configureExtension(win, ext, cmd, true); return true }
     extensionHost.launch(ext, cmd, win, args || {})
     return true
   }
@@ -1086,7 +1186,51 @@ Item {
     next[extId] = data
     root.extensionPrefs = next
     var file = root.configDir + "/prefs/" + String(extId).replace("/", ".") + ".json"
-    Quickshell.execDetached(["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && printf '%s\n' \"$2\" > \"$1\" && chmod 600 \"$1\"", "--", file, JSON.stringify(data, null, 2)])
+    root.writeSecretFile(file, data)
+  }
+
+  // Settings files that may hold secrets are written by the CLI's
+  // write-file: created 0600 through an unpredictable temp and renamed into
+  // place, never through a shell redirect that follows whatever sits at the
+  // name. The JSON travels on stdin, one line, newline-terminated.
+  function writeSecretFile(file, data) {
+    var proc = secretWriter.createObject(root, {
+      command: [root.pluginDir + "/bin/launcher", "write-file", "--mode", "600", "--", String(file)],
+      payload: JSON.stringify(data)
+    })
+    proc.running = true
+  }
+  Component {
+    id: secretWriter
+    Process {
+      property string payload: ""
+      stdinEnabled: true
+      onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+      onExited: function(code) { if (code !== 0) console.warn("launcher: write-file failed with", code); destroy() }
+    }
+  }
+
+  // Remote images an extension shows are fetched by the sidecar (bounded,
+  // sniffed, cached as a file) and loaded here from disk; a failure is
+  // remembered for the session so a bad URL is not retried per row.
+  property var imageCache: ({})
+  function fetchImage(url) {
+    var key = String(url || "")
+    var cached = root.imageCache[key]
+    if (cached !== undefined) return cached === false ? Promise.reject(new Error("unavailable")) : Promise.resolve(cached)
+    return extensionHost.request("image.fetch", { url: key }).then(function(r) {
+      var path = r && r.path ? String(r.path) : ""
+      var next = ({}); for (var k in root.imageCache) next[k] = root.imageCache[k]
+      next[key] = path || false
+      root.imageCache = next
+      if (!path) throw new Error("unavailable")
+      return path
+    }, function(e) {
+      var next = ({}); for (var k in root.imageCache) next[k] = root.imageCache[k]
+      next[key] = false
+      root.imageCache = next
+      throw e
+    })
   }
 
   function loadExtensionPrefs() { prefsLoader.running = true }

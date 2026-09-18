@@ -226,6 +226,7 @@ BuiltinHost {
   FileView {
     id: file
     path: host.snippetsPath
+    atomicWrites: true
     watchChanges: true
     printErrors: false
     onLoaded: host.load(text())

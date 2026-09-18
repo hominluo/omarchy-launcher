@@ -43,6 +43,50 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// packages/ext-host/src/fsio.ts
+function atomicWrite(file, data, mode = 384) {
+  const dir = path2.dirname(file);
+  fs2.mkdirSync(dir, { recursive: true });
+  let tmp = "", fd = -1;
+  for (let i = 0; i < 32 && fd < 0; i++) {
+    tmp = path2.join(dir, `.${path2.basename(file)}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`);
+    try {
+      fd = fs2.openSync(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  if (fd < 0) throw new Error(`could not create a temporary file beside ${file}`);
+  try {
+    const st = fs2.fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid() || st.nlink !== 1) throw new Error(`unexpected file at ${tmp}; refusing to write`);
+    fs2.writeSync(fd, data);
+    fs2.fsyncSync(fd);
+    fs2.closeSync(fd);
+    fd = -1;
+    fs2.renameSync(tmp, file);
+  } catch (e) {
+    if (fd >= 0) try {
+      fs2.closeSync(fd);
+    } catch {
+    }
+    try {
+      fs2.unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
+}
+var fs2, path2, import_node_crypto, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW;
+var init_fsio = __esm({
+  "packages/ext-host/src/fsio.ts"() {
+    fs2 = __toESM(require("node:fs"));
+    path2 = __toESM(require("node:path"));
+    import_node_crypto = require("node:crypto");
+    ({ O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs2.constants);
+  }
+});
+
 // vendor:react
 var require_react = __commonJS({
   "vendor:react"(exports2, module2) {
@@ -50,7 +94,7 @@ var require_react = __commonJS({
   }
 });
 
-// src/api/client.ts
+// packages/ext-host/src/api/client.ts
 function setClient(c) {
   client = c;
 }
@@ -63,7 +107,7 @@ function unsupported(name) {
 }
 var client;
 var init_client = __esm({
-  "src/api/client.ts"() {
+  "packages/ext-host/src/api/client.ts"() {
     client = null;
   }
 });
@@ -82,7 +126,7 @@ var require_jsx_dev_runtime = __commonJS({
   }
 });
 
-// src/patch-require.ts
+// packages/ext-host/src/patch-require.ts
 function patchRequire(api) {
   const react = require_react();
   const jsx = require_jsx_runtime();
@@ -116,15 +160,15 @@ function patchRequire(api) {
 }
 var import_node_module;
 var init_patch_require = __esm({
-  "src/patch-require.ts"() {
+  "packages/ext-host/src/patch-require.ts"() {
     import_node_module = __toESM(require("node:module"));
   }
 });
 
-// src/callbacks.ts
+// packages/ext-host/src/callbacks.ts
 var Callbacks;
 var init_callbacks = __esm({
-  "src/callbacks.ts"() {
+  "packages/ext-host/src/callbacks.ts"() {
     Callbacks = class {
       next = 1;
       handlers = /* @__PURE__ */ new Map();
@@ -177,7 +221,7 @@ var require_constants = __commonJS({
   }
 });
 
-// src/reconciler.ts
+// packages/ext-host/src/reconciler.ts
 function cleanProps(inst, props, callbacks) {
   const p = {};
   const h2 = [];
@@ -353,16 +397,22 @@ function createRenderer(callbacks, onCommit) {
 }
 var import_react_reconciler, import_constants, currentUpdatePriority, currentContainer;
 var init_reconciler = __esm({
-  "src/reconciler.ts"() {
+  "packages/ext-host/src/reconciler.ts"() {
     import_react_reconciler = __toESM(require_react_reconciler());
     import_constants = __toESM(require_constants());
     currentUpdatePriority = import_constants.NoEventPriority;
   }
 });
 
-// src/viewmodel.ts
-function str(v) {
-  return v === void 0 || v === null ? "" : String(v);
+// packages/ext-host/src/viewmodel.ts
+function str(v, max = CAP.text) {
+  return v === void 0 || v === null ? "" : String(v).slice(0, max);
+}
+function bounded(v) {
+  return typeof v === "string" ? v.slice(0, CAP.value) : v;
+}
+function capList(items, max) {
+  return items.length > max ? items.slice(0, max) : items;
 }
 function image(v, ctx) {
   if (v === void 0 || v === null || v === "") return null;
@@ -488,7 +538,12 @@ function actionPanel(inst, ctx) {
   };
   walk(inst.c, null);
   flush();
-  return { title: str(inst.p.title), sections };
+  let budget = CAP.actions;
+  for (const section of sections) {
+    section.actions = capList(section.actions, Math.max(0, budget));
+    budget -= section.actions.length;
+  }
+  return { title: str(inst.p.title), sections: sections.filter((x) => x.actions.length) };
 }
 function metadata(inst, ctx) {
   if (!inst) return [];
@@ -498,6 +553,7 @@ function metadata(inst, ctx) {
     else if (c.t === "metadata-link") out.push({ kind: "link", title: str(c.p.title), text: str(c.p.text), target: str(c.p.target) });
     else if (c.t === "metadata-taglist") out.push({ kind: "tags", title: str(c.p.title), tags: c.c.filter((t) => t.t === "metadata-tag").map((t) => ({ text: str(t.p.text), color: t.p.color ? color(t.p.color, ctx) : "", icon: image(t.p.icon, ctx), callbackId: t.p.onAction || null })) });
     else if (c.t === "metadata-separator") out.push({ kind: "separator" });
+    if (out.length >= CAP.metadata) break;
   }
   return out;
 }
@@ -513,10 +569,10 @@ function listItem(inst, ctx, index) {
     title: typeof p.title === "object" && p.title ? str(p.title.value) : str(p.title),
     subtitle: typeof p.subtitle === "object" && p.subtitle ? str(p.subtitle.value) : str(p.subtitle),
     icon: image(p.icon, ctx),
-    keywords: Array.isArray(p.keywords) ? p.keywords.map(str) : [],
-    accessories: accessories(p.accessories, ctx),
+    keywords: Array.isArray(p.keywords) ? capList(p.keywords, CAP.keywords).map((k) => str(k)) : [],
+    accessories: capList(accessories(p.accessories, ctx) || [], CAP.accessories),
     actions: actionPanel(childOf(inst, "action-panel"), ctx),
-    detail: detailInst ? { markdown: str(detailInst.p.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
+    detail: detailInst ? { markdown: str(detailInst.p.markdown, CAP.markdown), isLoading: detailInst.p.isLoading === true, metadata: metadata(childOf(detailInst, "metadata"), ctx) } : null,
     quickLook: p.quickLook ? { path: str(p.quickLook.path), name: str(p.quickLook.name) } : null
   };
   return item;
@@ -532,7 +588,7 @@ function gridItem(inst, ctx, index) {
     id: str(p.id || "g" + index),
     title: str(p.title),
     subtitle: str(p.subtitle),
-    keywords: Array.isArray(p.keywords) ? p.keywords.map(str) : [],
+    keywords: Array.isArray(p.keywords) ? capList(p.keywords, CAP.keywords).map((k) => str(k)) : [],
     content,
     accessory: p.accessory ? { icon: image(p.accessory.icon, ctx), text: str(p.accessory.text), tooltip: str(p.accessory.tooltip) } : null,
     actions: actionPanel(childOf(inst, "action-panel"), ctx)
@@ -542,15 +598,21 @@ function dropdown(inst, ctx) {
   if (!inst) return null;
   const sections = [];
   let loose = [];
-  const item = (c) => ({ value: str(c.p.value), title: str(c.p.title), icon: image(c.p.icon, ctx), keywords: Array.isArray(c.p.keywords) ? c.p.keywords.map(str) : [] });
+  const item = (c) => ({ value: str(c.p.value), title: str(c.p.title), icon: image(c.p.icon, ctx), keywords: Array.isArray(c.p.keywords) ? capList(c.p.keywords, CAP.keywords).map((k) => str(k)) : [] });
+  let budget = CAP.dropdown;
   for (const c of inst.c) {
-    if (c.t === "dropdown-item") loose.push(item(c));
-    else if (c.t === "dropdown-section") {
+    if (budget <= 0) break;
+    if (c.t === "dropdown-item") {
+      loose.push(item(c));
+      budget--;
+    } else if (c.t === "dropdown-section") {
       if (loose.length) {
         sections.push({ title: "", items: loose });
         loose = [];
       }
-      sections.push({ title: str(c.p.title), items: c.c.filter((x) => x.t === "dropdown-item").map(item) });
+      const items = capList(c.c.filter((x) => x.t === "dropdown-item"), budget).map(item);
+      budget -= items.length;
+      sections.push({ title: str(c.p.title), items });
     }
   }
   if (loose.length) sections.push({ title: "", items: loose });
@@ -574,10 +636,12 @@ function collection(inst, ctx, itemType, mapItem) {
     }
   };
   for (const c of inst.c) {
+    if (n >= CAP.items || sections.length >= CAP.sections) break;
     if (c.t === itemType) loose.push(mapItem(c, ctx, n++));
     else if (c.t === itemType.replace("-item", "-section")) {
       flush();
-      sections.push({ id: str(c.p.id || "s" + sections.length), title: str(c.p.title), subtitle: str(c.p.subtitle), columns: c.p.columns, aspectRatio: c.p.aspectRatio, inset: c.p.inset, fit: c.p.fit, items: c.c.filter((x) => x.t === itemType).map((x) => mapItem(x, ctx, n++)) });
+      const kids = capList(c.c.filter((x) => x.t === itemType), Math.max(0, CAP.items - n));
+      sections.push({ id: str(c.p.id || "s" + sections.length), title: str(c.p.title), subtitle: str(c.p.subtitle), columns: c.p.columns, aspectRatio: c.p.aspectRatio, inset: c.p.inset, fit: c.p.fit, items: kids.map((x) => mapItem(x, ctx, n++)) });
     } else if (c.t === "empty-view") empty = emptyView(c, ctx);
     else if (c.t === "dropdown") accessory = dropdown(c, ctx);
     else if (c.t === "action-panel") actions = actionPanel(c, ctx);
@@ -637,7 +701,7 @@ function grid(inst, ctx) {
 }
 function detail(inst, ctx) {
   const p = inst.p;
-  return { id: ctx.viewId, type: "detail", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, markdown: str(p.markdown), metadata: metadata(childOf(inst, "metadata"), ctx), actions: actionPanel(childOf(inst, "action-panel"), ctx) };
+  return { id: ctx.viewId, type: "detail", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, markdown: str(p.markdown, CAP.markdown), metadata: metadata(childOf(inst, "metadata"), ctx), actions: actionPanel(childOf(inst, "action-panel"), ctx) };
 }
 function form(inst, ctx) {
   const p = inst.p;
@@ -651,6 +715,7 @@ function form(inst, ctx) {
     }
     const kind = FORM_KINDS[c.t];
     if (!kind) continue;
+    if (fields.length >= CAP.fields) break;
     const f = { id: str(c.p.id || "f" + fields.length), field: kind, title: str(c.p.title), info: str(c.p.info), error: str(c.p.error), placeholder: str(c.p.placeholder), autoFocus: c.p.autoFocus === true, storeValue: c.p.storeValue === true, handlers: { change: c.p.onChange || null, focus: c.p.onFocus || null, blur: c.p.onBlur || null } };
     if (kind === "date") {
       f.value = dateValue(c.p.value);
@@ -659,18 +724,26 @@ function form(inst, ctx) {
       f.min = dateValue(c.p.min);
       f.max = dateValue(c.p.max);
     } else {
-      if (c.p.value !== void 0) f.value = c.p.value;
-      if (c.p.defaultValue !== void 0) f.defaultValue = c.p.defaultValue;
+      if (c.p.value !== void 0) f.value = bounded(c.p.value);
+      if (c.p.defaultValue !== void 0) f.defaultValue = bounded(c.p.defaultValue);
     }
     if (kind === "checkbox") f.label = str(c.p.label);
-    if (kind === "description") f.text = str(c.p.text);
+    if (kind === "description") f.text = str(c.p.text, CAP.value);
     if (kind === "textarea") f.enableMarkdown = c.p.enableMarkdown === true;
     if (kind === "dropdown" || kind === "tags") {
       const items = [];
       const item = (x) => ({ value: str(x.p.value), title: str(x.p.title), icon: image(x.p.icon, ctx) });
+      let budget = CAP.dropdown;
       for (const x of c.c) {
-        if (x.t === "dropdown-item") items.push(item(x));
-        else if (x.t === "dropdown-section") items.push({ title: str(x.p.title), items: x.c.filter((y) => y.t === "dropdown-item").map(item) });
+        if (budget <= 0) break;
+        if (x.t === "dropdown-item") {
+          items.push(item(x));
+          budget--;
+        } else if (x.t === "dropdown-section") {
+          const kids = capList(x.c.filter((y) => y.t === "dropdown-item"), budget).map(item);
+          budget -= kids.length;
+          items.push({ title: str(x.p.title), items: kids });
+        }
       }
       f.items = items;
       f.filtering = c.p.filtering;
@@ -689,9 +762,11 @@ function form(inst, ctx) {
   return { id: ctx.viewId, type: "form", navigationTitle: str(p.navigationTitle), isLoading: p.isLoading === true, enableDrafts: p.enableDrafts === true, fields, actions };
 }
 function menubar(inst, ctx) {
+  let budget = CAP.menubar;
   const items = (children) => {
     const out = [];
     for (const c of children) {
+      if (--budget < 0) break;
       if (c.t === "menubar-item") out.push({ kind: "item", id: str(c.p.onAction || "m" + ++autoId), title: str(c.p.title), subtitle: str(c.p.subtitle), icon: image(c.p.icon, ctx), tooltip: str(c.p.tooltip), shortcut: shortcut(c.p.shortcut), callbackId: c.p.onAction || null });
       else if (c.t === "menubar-submenu") out.push({ kind: "submenu", title: str(c.p.title), icon: image(c.p.icon, ctx), items: items(c.c) });
       else if (c.t === "menubar-section") out.push({ kind: "section", title: str(c.p.title), items: items(c.c) });
@@ -701,8 +776,8 @@ function menubar(inst, ctx) {
   };
   return { id: ctx.viewId, type: "menubar", title: str(inst.p.title), icon: image(inst.p.icon, ctx), tooltip: str(inst.p.tooltip), isLoading: inst.p.isLoading === true, items: items(inst.c) };
 }
-function serializeView(slot, ctx) {
-  const root = slot.c.find((c) => c.t !== "#text" && c.t !== "#fragment") || slot.c[0] && slot.c[0].c.find((c) => c.t !== "#text");
+function serializeView(slot2, ctx) {
+  const root = slot2.c.find((c) => c.t !== "#text" && c.t !== "#fragment") || slot2.c[0] && slot2.c[0].c.find((c) => c.t !== "#text");
   if (!root) return { id: ctx.viewId, type: "list", isLoading: true, sections: [], searchBarPlaceholder: "Loading\u2026" };
   switch (root.t) {
     case "list":
@@ -719,19 +794,33 @@ function serializeView(slot, ctx) {
       return { id: ctx.viewId, type: "detail", markdown: "Unsupported root component: `" + root.t + "`", metadata: [], actions: null };
   }
 }
-var autoId, KEY_LABELS, FORM_KINDS;
+var autoId, CAP, KEY_LABELS, FORM_KINDS;
 var init_viewmodel = __esm({
-  "src/viewmodel.ts"() {
+  "packages/ext-host/src/viewmodel.ts"() {
     autoId = 0;
+    CAP = {
+      text: 512,
+      markdown: 256 * 1024,
+      items: 2e3,
+      sections: 100,
+      keywords: 50,
+      accessories: 8,
+      actions: 100,
+      metadata: 200,
+      fields: 200,
+      dropdown: 2e3,
+      menubar: 500,
+      value: 64 * 1024
+    };
     KEY_LABELS = { return: "\u21B5", enter: "\u21B5", delete: "\u232B", backspace: "\u232B", deleteForward: "\u2326", tab: "\u21E5", arrowUp: "\u2191", arrowDown: "\u2193", arrowLeft: "\u2190", arrowRight: "\u2192", pageUp: "\u21DE", pageDown: "\u21DF", home: "\u2196", end: "\u2198", space: "\u2423", escape: "\u238B" };
     FORM_KINDS = { "form-textfield": "text", "form-password": "password", "form-textarea": "textarea", "form-checkbox": "checkbox", "form-datepicker": "date", "form-dropdown": "dropdown", "form-tagpicker": "tags", "form-filepicker": "file", "form-separator": "separator", "form-description": "description", "form-linkaccessory": "link" };
   }
 });
 
-// src/api/icons.generated.ts
+// packages/ext-host/src/api/icons.generated.ts
 var Icon;
 var init_icons_generated = __esm({
-  "src/api/icons.generated.ts"() {
+  "packages/ext-host/src/api/icons.generated.ts"() {
     Icon = {
       AddPerson: "add-person-16",
       Airplane: "airplane-16",
@@ -1215,10 +1304,10 @@ var init_icons_generated = __esm({
   }
 });
 
-// src/api/enums.ts
+// packages/ext-host/src/api/enums.ts
 var Color, ImageMask, Image, ToastStyle, AlertActionStyle, ActionStyle, LaunchType, PopToRootType, DatePickerType, GridInset, GridFit, GridItemSize, GridAspectRatio, Keyboard;
 var init_enums = __esm({
-  "src/api/enums.ts"() {
+  "packages/ext-host/src/api/enums.ts"() {
     init_icons_generated();
     Color = {
       Blue: "raycast-blue",
@@ -1269,7 +1358,7 @@ var init_enums = __esm({
   }
 });
 
-// src/api/components.tsx
+// packages/ext-host/src/api/components.tsx
 function rest(props, drop) {
   const out = {};
   for (const k of Object.keys(props || {})) if (drop.indexOf(k) < 0) out[k] = props[k];
@@ -1291,7 +1380,7 @@ function clipboardContent(content) {
 }
 var React, h, NavigationContext, Metadata, Dropdown, EmptyView, List, Grid, Detail, Form, ActionPanel, Action, MenuBarExtra, ListItem, ListSection, FormTextField, FormTextArea, FormCheckbox, FormDatePicker, FormDropdown, FormDropdownItem, FormDropdownSection, FormTagPicker, FormTagPickerItem, FormSeparator, ActionPanelItem, ActionPanelSection, ActionPanelSubmenu, CopyToClipboardAction, PasteAction, OpenAction, OpenInBrowserAction, OpenWithAction, ShowInFinderAction, TrashAction, PushAction, SubmitFormAction, useActionPanel, useId2, render;
 var init_components = __esm({
-  "src/api/components.tsx"() {
+  "packages/ext-host/src/api/components.tsx"() {
     React = __toESM(require_react());
     init_client();
     init_enums();
@@ -1404,51 +1493,7 @@ var init_components = __esm({
   }
 });
 
-// src/fsio.ts
-function atomicWrite(file, data, mode = 384) {
-  const dir = path2.dirname(file);
-  fs2.mkdirSync(dir, { recursive: true });
-  let tmp = "", fd = -1;
-  for (let i = 0; i < 32 && fd < 0; i++) {
-    tmp = path2.join(dir, `.${path2.basename(file)}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`);
-    try {
-      fd = fs2.openSync(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-    }
-  }
-  if (fd < 0) throw new Error(`could not create a temporary file beside ${file}`);
-  try {
-    const st = fs2.fstatSync(fd);
-    if (!st.isFile() || st.uid !== process.getuid() || st.nlink !== 1) throw new Error(`unexpected file at ${tmp}; refusing to write`);
-    fs2.writeSync(fd, data);
-    fs2.fsyncSync(fd);
-    fs2.closeSync(fd);
-    fd = -1;
-    fs2.renameSync(tmp, file);
-  } catch (e) {
-    if (fd >= 0) try {
-      fs2.closeSync(fd);
-    } catch {
-    }
-    try {
-      fs2.unlinkSync(tmp);
-    } catch {
-    }
-    throw e;
-  }
-}
-var fs2, path2, import_node_crypto, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW;
-var init_fsio = __esm({
-  "src/fsio.ts"() {
-    fs2 = __toESM(require("node:fs"));
-    path2 = __toESM(require("node:path"));
-    import_node_crypto = require("node:crypto");
-    ({ O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs2.constants);
-  }
-});
-
-// src/api/services.ts
+// packages/ext-host/src/api/services.ts
 function getPreferenceValues() {
   return { ...getClient().preferences };
 }
@@ -1499,7 +1544,7 @@ function contentOf(content) {
   return { text: content.text !== void 0 ? String(content.text) : "", html: content.html ? String(content.html) : void 0, file: content.file ? String(content.file) : void 0 };
 }
 function store() {
-  if (!localStore) localStore = new JsonStore(path3.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
+  if (!localStore) localStore = new JsonStore(path4.join(getClient().env.supportPath, ".launcher", "localstorage.json"));
   return localStore;
 }
 function flushStorage() {
@@ -1510,6 +1555,10 @@ function readStoredDropdown(command, id) {
 }
 function writeStoredDropdown(command, id, value) {
   store().set(`__dropdown:${command}:${id}`, value);
+}
+function safeName(value, fallback) {
+  const s = String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "_");
+  return !s || s === "." || s === ".." ? fallback : s.slice(0, 128);
 }
 async function open(target, application) {
   const client2 = getClient();
@@ -1557,11 +1606,11 @@ async function updateCommandMetadata(metadata2) {
   const client2 = getClient();
   client2.notify("command.updateMetadata", { s: client2.sessionId, subtitle: metadata2 && metadata2.subtitle !== void 0 ? metadata2.subtitle : null });
 }
-var fs3, path3, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
+var fs4, path4, import_node_events, environment, preferences, Toast, toastActions, Alert, Clipboard, copyTextToClipboard, pasteText, clearClipboard, JsonStore, localStore, LocalStorage, getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, allLocalStorageItems, clearLocalStorage, Cache, randomId, specialKeys, AI, aiStreams, unstable_AI, useUnstableAI, WindowManagement, BrowserExtension, OAuth, Tool;
 var init_services = __esm({
-  "src/api/services.ts"() {
-    fs3 = __toESM(require("node:fs"));
-    path3 = __toESM(require("node:path"));
+  "packages/ext-host/src/api/services.ts"() {
+    fs4 = __toESM(require("node:fs"));
+    path4 = __toESM(require("node:path"));
     import_node_events = require("node:events");
     init_client();
     init_fsio();
@@ -1732,7 +1781,7 @@ var init_services = __esm({
       load() {
         if (this.data) return this.data;
         try {
-          this.data = JSON.parse(fs3.readFileSync(this.file, "utf8"));
+          this.data = JSON.parse(fs4.readFileSync(this.file, "utf8"));
         } catch {
           this.data = {};
         }
@@ -1806,30 +1855,30 @@ var init_services = __esm({
       subscribers = /* @__PURE__ */ new Set();
       capacity;
       constructor(options) {
-        const ns = options && options.namespace ? String(options.namespace).replace(/[^A-Za-z0-9._-]/g, "_") : "default";
+        const ns = options && options.namespace ? safeName(options.namespace, "default") : "default";
         this.capacity = options && options.capacity ? Number(options.capacity) : 10 * 1024 * 1024;
-        this.dir = path3.join(getClient().env.supportPath, ".launcher", "cache", ns);
+        this.dir = path4.join(getClient().env.supportPath, ".launcher", "cache", ns);
         try {
-          fs3.mkdirSync(this.dir, { recursive: true });
+          fs4.mkdirSync(this.dir, { recursive: true });
         } catch {
         }
       }
       fileFor(key) {
-        return path3.join(this.dir, Buffer.from(String(key)).toString("base64url"));
+        return path4.join(this.dir, Buffer.from(String(key)).toString("base64url"));
       }
       get(key) {
         try {
-          return fs3.readFileSync(this.fileFor(key), "utf8");
+          return fs4.readFileSync(this.fileFor(key), "utf8");
         } catch {
           return void 0;
         }
       }
       has(key) {
-        return fs3.existsSync(this.fileFor(key));
+        return fs4.existsSync(this.fileFor(key));
       }
       get isEmpty() {
         try {
-          return fs3.readdirSync(this.dir).length === 0;
+          return fs4.readdirSync(this.dir).length === 0;
         } catch {
           return true;
         }
@@ -1846,7 +1895,7 @@ var init_services = __esm({
       remove(key) {
         let removed = false;
         try {
-          fs3.unlinkSync(this.fileFor(key));
+          fs4.unlinkSync(this.fileFor(key));
           removed = true;
         } catch {
         }
@@ -1855,7 +1904,7 @@ var init_services = __esm({
       }
       clear(options) {
         try {
-          for (const f of fs3.readdirSync(this.dir)) fs3.unlinkSync(path3.join(this.dir, f));
+          for (const f of fs4.readdirSync(this.dir)) fs4.unlinkSync(path4.join(this.dir, f));
         } catch {
         }
         if (!(options && options.notifySubscribers === false)) for (const s of this.subscribers) s(void 0, void 0);
@@ -1868,8 +1917,8 @@ var init_services = __esm({
       }
       evict() {
         try {
-          const entries = fs3.readdirSync(this.dir).map((f) => {
-            const st = fs3.statSync(path3.join(this.dir, f));
+          const entries = fs4.readdirSync(this.dir).map((f) => {
+            const st = fs4.statSync(path4.join(this.dir, f));
             return { f, size: st.size, atime: st.atimeMs };
           });
           let total = entries.reduce((a, e) => a + e.size, 0);
@@ -1878,7 +1927,7 @@ var init_services = __esm({
           for (const e of entries) {
             if (total <= this.capacity) break;
             try {
-              fs3.unlinkSync(path3.join(this.dir, e.f));
+              fs4.unlinkSync(path4.join(this.dir, e.f));
               total -= e.size;
             } catch {
             }
@@ -1953,14 +2002,17 @@ var init_services = __esm({
           this.redirectMethod = options.redirectMethod;
           this.providerName = String(options.providerName || "");
           this.providerIcon = options.providerIcon;
-          this.providerId = String(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+          this.providerId = safeName(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"), "provider");
           this.description = String(options.description || "");
-          this.tokenFile = path3.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
+          this.tokenFile = path4.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json");
         }
+        // The launcher handles exactly one URL scheme, its own. Raycast's redirect
+        // URLs (raycast://oauth, com.raycast:/oauth, raycast.com/redirect) would
+        // bounce back to a scheme this machine does not route to us, so every
+        // method advertises the launcher's; a provider whose OAuth app only
+        // registered Raycast's redirect URI will reject the request.
         get redirectURL() {
-          if (this.redirectMethod === "app") return "raycast://oauth?package_name=Extension";
-          if (this.redirectMethod === "appURI") return "com.raycast:/oauth?package_name=Extension";
-          return "https://raycast.com/redirect?packageName=Extension";
+          return "omarchy-launcher://oauth?package_name=Extension";
         }
         async authorizationRequest(options) {
           const crypto = require("node:crypto");
@@ -1986,7 +2038,7 @@ var init_services = __esm({
         }
         async getTokens() {
           try {
-            const data = JSON.parse(fs3.readFileSync(this.tokenFile, "utf8"));
+            const data = JSON.parse(fs4.readFileSync(this.tokenFile, "utf8"));
             return { ...data, isExpired: () => data.expiresIn ? Date.now() > (data.updatedAt || 0) + Number(data.expiresIn) * 1e3 - 1e4 : false };
           } catch {
             return void 0;
@@ -1998,7 +2050,7 @@ var init_services = __esm({
         }
         async removeTokens() {
           try {
-            fs3.unlinkSync(this.tokenFile);
+            fs4.unlinkSync(this.tokenFile);
           } catch {
           }
         }
@@ -2008,7 +2060,7 @@ var init_services = __esm({
   }
 });
 
-// src/api/index.ts
+// packages/ext-host/src/api/index.ts
 var api_exports = {};
 __export(api_exports, {
   AI: () => AI,
@@ -2092,6 +2144,7 @@ __export(api_exports, {
   readStoredDropdown: () => readStoredDropdown,
   removeLocalStorageItem: () => removeLocalStorageItem,
   render: () => render,
+  safeName: () => safeName,
   setLocalStorageItem: () => setLocalStorageItem,
   showHUD: () => showHUD,
   showInFinder: () => showInFinder,
@@ -2108,7 +2161,7 @@ __export(api_exports, {
   writeStoredDropdown: () => writeStoredDropdown
 });
 var init_api = __esm({
-  "src/api/index.ts"() {
+  "packages/ext-host/src/api/index.ts"() {
     init_components();
     init_services();
     init_enums();
@@ -2116,7 +2169,7 @@ var init_api = __esm({
   }
 });
 
-// src/worker.tsx
+// packages/ext-host/src/worker.tsx
 var worker_exports = {};
 __export(worker_exports, {
   runWorker: () => runWorker
@@ -2165,7 +2218,7 @@ function runWorker(data) {
   };
   setClient(client2);
   try {
-    fs4.mkdirSync(load.paths.support, { recursive: true });
+    fs5.mkdirSync(load.paths.support, { recursive: true });
   } catch {
   }
   port.on("message", (m) => {
@@ -2212,9 +2265,9 @@ function runWorker(data) {
     flushScheduled = false;
     const slots = renderer.container.c.filter((c) => c.t === "view");
     const views = [];
-    for (const slot of slots) {
-      const viewId = String(slot.p.id);
-      const root = serializeView(slot, { assetsPath: load.paths.assets, appearance: load.env.appearance, viewId });
+    for (const slot2 of slots) {
+      const viewId = String(slot2.p.id);
+      const root = serializeView(slot2, { assetsPath: load.paths.assets, appearance: load.env.appearance, viewId });
       const encoded = JSON.stringify(root);
       lastViews.set(viewId, root);
       if (lastSent.get(viewId) === encoded) continue;
@@ -2413,11 +2466,11 @@ function runWorker(data) {
     return !(fn.constructor && fn.constructor.name === "AsyncFunction");
   }
 }
-var import_node_worker_threads, fs4, React2;
+var import_node_worker_threads, fs5, React2;
 var init_worker = __esm({
-  "src/worker.tsx"() {
+  "packages/ext-host/src/worker.tsx"() {
     import_node_worker_threads = require("node:worker_threads");
-    fs4 = __toESM(require("node:fs"));
+    fs5 = __toESM(require("node:fs"));
     React2 = __toESM(require_react());
     init_client();
     init_patch_require();
@@ -2427,10 +2480,11 @@ var init_worker = __esm({
   }
 });
 
-// src/index.ts
+// packages/ext-host/src/index.ts
 var import_node_worker_threads2 = require("node:worker_threads");
 
-// src/transport.ts
+// packages/ext-host/src/transport.ts
+var MAX_FRAME = 8 * 1024 * 1024;
 var Transport = class {
   constructor(input, output, idPrefix = "") {
     this.input = input;
@@ -2494,7 +2548,12 @@ var Transport = class {
     }
   }
   write(msg) {
-    this.output.write(JSON.stringify(msg) + "\n");
+    const line = JSON.stringify(msg);
+    if (Buffer.byteLength(line) > MAX_FRAME) {
+      this.log(`dropped an oversized frame (${msg && msg.method || "response"})`);
+      return;
+    }
+    this.output.write(line + "\n");
   }
   notify(method, params) {
     this.write({ jsonrpc: "2.0", method, params });
@@ -2524,10 +2583,10 @@ var Transport = class {
   }
 };
 
-// src/protocol.ts
+// packages/ext-host/src/protocol.ts
 var PROTOCOL_VERSION = 1;
 
-// src/ai/provider.ts
+// packages/ext-host/src/ai/provider.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_os = __toESM(require("node:os"));
 var import_node_path = __toESM(require("node:path"));
@@ -2685,7 +2744,129 @@ async function* ollama(messages, model, cfg, temp, options) {
   }
 }
 
-// src/index.ts
+// packages/ext-host/src/images.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path2 = __toESM(require("node:path"));
+var import_node_crypto2 = require("node:crypto");
+init_fsio();
+var IMAGES_DIR = import_node_path2.default.join(import_node_os2.default.homedir(), ".cache", "omarchy-launcher", "images");
+var MAX_BYTES = 2 * 1024 * 1024;
+var TIMEOUT_MS = 1e4;
+var CACHE_BYTES = 50 * 1024 * 1024;
+var PARALLEL = 4;
+var EXTS = ["png", "jpg", "gif", "webp"];
+var inflight = /* @__PURE__ */ new Map();
+var running = 0;
+var queue = [];
+function sniff(buf) {
+  if (buf.length >= 8 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71 && buf[4] === 13 && buf[5] === 10 && buf[6] === 26 && buf[7] === 10) return "png";
+  if (buf.length >= 3 && buf[0] === 255 && buf[1] === 216 && buf[2] === 255) return "jpg";
+  if (buf.length >= 6 && (buf.subarray(0, 6).toString("latin1") === "GIF87a" || buf.subarray(0, 6).toString("latin1") === "GIF89a")) return "gif";
+  if (buf.length >= 12 && buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
+  return "";
+}
+function keyFor(url) {
+  return (0, import_node_crypto2.createHash)("sha256").update(url).digest("hex");
+}
+function cached(key) {
+  for (const ext of EXTS) {
+    const p = import_node_path2.default.join(IMAGES_DIR, `${key}.${ext}`);
+    try {
+      if (import_node_fs2.default.lstatSync(p).isFile()) {
+        const now = /* @__PURE__ */ new Date();
+        try {
+          import_node_fs2.default.utimesSync(p, now, now);
+        } catch {
+        }
+        return p;
+      }
+    } catch {
+    }
+  }
+  return "";
+}
+function evict() {
+  let entries = [];
+  try {
+    for (const name of import_node_fs2.default.readdirSync(IMAGES_DIR)) {
+      const p = import_node_path2.default.join(IMAGES_DIR, name);
+      try {
+        const st = import_node_fs2.default.lstatSync(p);
+        if (st.isFile()) entries.push({ p, size: st.size, atime: st.atimeMs });
+      } catch {
+      }
+    }
+  } catch {
+    return;
+  }
+  let total = entries.reduce((n, e) => n + e.size, 0);
+  entries.sort((a, b) => a.atime - b.atime);
+  for (const e of entries) {
+    if (total <= CACHE_BYTES) break;
+    try {
+      import_node_fs2.default.unlinkSync(e.p);
+      total -= e.size;
+    } catch {
+    }
+  }
+}
+async function slot(fn) {
+  if (running >= PARALLEL) await new Promise((resolve2) => queue.push(resolve2));
+  running++;
+  try {
+    return await fn();
+  } finally {
+    running--;
+    const next = queue.shift();
+    if (next) next();
+  }
+}
+async function download(url) {
+  const u = new URL(url);
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("bad scheme");
+  const key = keyFor(url);
+  const hit = cached(key);
+  if (hit) return hit;
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "follow", headers: { accept: "image/*", "user-agent": "omarchy-launcher" } });
+  if (!res.ok) throw new Error(`http ${res.status}`);
+  const declared = Number(res.headers.get("content-length") || 0);
+  if (declared > MAX_BYTES) throw new Error("image too large");
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("empty response");
+  const chunks = [];
+  let total = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BYTES) {
+      await reader.cancel();
+      throw new Error("image too large");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  const buf = Buffer.concat(chunks);
+  const ext = sniff(buf);
+  if (!ext) throw new Error("not an image");
+  import_node_fs2.default.mkdirSync(IMAGES_DIR, { recursive: true, mode: 448 });
+  const file = import_node_path2.default.join(IMAGES_DIR, `${key}.${ext}`);
+  atomicWrite(file, buf, 384);
+  evict();
+  return file;
+}
+function fetchImage(url) {
+  const text = String(url || "");
+  if (text.length > 2048) return Promise.reject(new Error("url too long"));
+  const pending = inflight.get(text);
+  if (pending) return pending;
+  const p = slot(() => download(text)).finally(() => inflight.delete(text));
+  inflight.set(text, p);
+  return p;
+}
+
+// packages/ext-host/src/index.ts
+var MAX_AI_TEXT = 1024 * 1024;
 if (!import_node_worker_threads2.isMainThread) {
   (init_worker(), __toCommonJS(worker_exports)).runWorker(import_node_worker_threads2.workerData);
 } else {
@@ -2729,12 +2910,19 @@ function main() {
           for await (const chunk of stream(params.messages || [], { model: params.model, creativity: params.creativity, system: params.system, signal: ctrl.signal })) {
             text += chunk;
             transport.notify("ai.chunk", { id: params.id, text: chunk });
+            if (text.length > MAX_AI_TEXT) {
+              text += "\n[truncated]";
+              ctrl.abort();
+              break;
+            }
           }
         } finally {
           aiAborts.delete(String(params.id));
         }
         return { text };
       }
+      case "image.fetch":
+        return { path: await fetchImage(String(params && params.url || "")) };
       default:
         throw new Error("unknown method " + method);
     }
@@ -2802,6 +2990,19 @@ function main() {
           if (c) c.abort();
           return;
         }
+        const size = frameSize(msg);
+        if (size > MAX_FRAME) {
+          if (msg && msg.method === "ui.render") {
+            log(`[${params.extensionId}] view too large (${size} bytes); ending session`);
+            transport.notify("manager.crash", { s: params.s, reason: `view too large (> ${Math.round(MAX_FRAME / (1024 * 1024))} MiB)`, stack: "" });
+            unload(params.s, true);
+          } else if (msg && msg.id !== void 0 && msg.method !== void 0) {
+            worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, error: { code: -32e3, message: "request too large" } } });
+          } else {
+            log(`[${params.extensionId}] dropped an oversized ${msg && msg.method || "message"} (${size} bytes)`);
+          }
+          return;
+        }
         transport.write(msg);
         return;
       }
@@ -2839,15 +3040,27 @@ function main() {
       });
     });
   }
+  function frameSize(msg) {
+    try {
+      return Buffer.byteLength(JSON.stringify(msg));
+    } catch {
+      return 0;
+    }
+  }
   async function serveAiAsk(worker, msg) {
     const p = msg.params || {};
     const ctrl = new AbortController();
     aiAborts.set(String(p.id), ctrl);
     let text = "";
     try {
-      for await (const chunk of stream([{ role: "user", content: String(p.prompt || "") }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
+      for await (const chunk of stream([{ role: "user", content: String(p.prompt || "").slice(0, MAX_AI_TEXT) }], { model: p.model, creativity: p.creativity, signal: ctrl.signal })) {
         text += chunk;
         worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", method: "ai.chunk", params: { id: p.id, text: chunk } } });
+        if (text.length > MAX_AI_TEXT) {
+          text += "\n[truncated]";
+          ctrl.abort();
+          break;
+        }
       }
       worker.postMessage({ type: "rpc", msg: { jsonrpc: "2.0", id: msg.id, result: { text } } });
     } catch (e) {
@@ -2883,7 +3096,7 @@ function main() {
     version: "0.1.0",
     node: process.version,
     pid: process.pid,
-    capabilities: ["view", "no-view", "oauth", "ai"],
+    capabilities: ["view", "no-view", "oauth", "ai", "images"],
     ai: configuredProviders()
   });
 }

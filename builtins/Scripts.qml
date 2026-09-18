@@ -215,20 +215,29 @@ BuiltinHost {
     if (viewId === "script-output" && runner.mode === "full" && runner.running) runner.signal(15)
   }
 
+  // A chatty script must not grow the shell's memory or re-render on every
+  // line: output keeps its tail under a cap and the view refreshes on a timer.
+  readonly property int outputCap: 256 * 1024
+  Timer {
+    id: renderTimer
+    interval: 100
+    onTriggered: if (runner.mode === "full") { host.output = runner.collected; host.render(host.outputView()) }
+  }
   Process {
     id: runner
     property string mode: "full"
     property string title: ""
     property string path: ""
     property string collected: ""
-    stdout: SplitParser {
-      onRead: function(line) {
-        runner.collected += line + "\n"
-        if (runner.mode === "full") { host.output = runner.collected; host.render(host.outputView()) }
-      }
+    function append(line) {
+      runner.collected += line + "\n"
+      if (runner.collected.length > host.outputCap) runner.collected = "…[earlier output dropped]\n" + runner.collected.slice(-host.outputCap)
+      if (runner.mode === "full" && !renderTimer.running) renderTimer.start()
     }
-    stderr: SplitParser { onRead: function(line) { runner.collected += line + "\n"; if (runner.mode === "full") { host.output = runner.collected; host.render(host.outputView()) } } }
+    stdout: SplitParser { onRead: function(line) { runner.append(line) } }
+    stderr: SplitParser { onRead: function(line) { runner.append(line) } }
     onExited: function(code, status) {
+      renderTimer.stop()
       var lines = runner.collected.replace(/\s+$/, "").split("\n")
       var last = lines[lines.length - 1] || ""
       if (runner.mode === "full") { host.outputDone = true; host.output = runner.collected.replace(/\s+$/, ""); host.render(host.outputView()) }

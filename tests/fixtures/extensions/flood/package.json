@@ -1,0 +1,5 @@
+{ "name": "flood", "title": "Flood (test)", "description": "Renders far more than a view may hold", "author": "test",
+  "commands": [
+    { "name": "flood", "title": "Flood List", "mode": "view" },
+    { "name": "oversize", "title": "Oversized Frame", "mode": "view" }
+  ] }

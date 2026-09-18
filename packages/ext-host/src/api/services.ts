@@ -212,12 +212,19 @@ export function writeStoredDropdown(command: string, id: string, value: string) 
 
 // ---- cache (files under support/.launcher/cache/<namespace>)
 
+// A name an extension chose that becomes one path component under its
+// support directory: never a separator, never "." or "..".
+export function safeName(value: any, fallback: string): string {
+  const s = String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "_")
+  return !s || s === "." || s === ".." ? fallback : s.slice(0, 128)
+}
+
 export class Cache {
   private dir: string
   private subscribers = new Set<(key: string | undefined, data: string | undefined) => void>()
   private capacity: number
   constructor(options?: any) {
-    const ns = options && options.namespace ? String(options.namespace).replace(/[^A-Za-z0-9._-]/g, "_") : "default"
+    const ns = options && options.namespace ? safeName(options.namespace, "default") : "default"
     this.capacity = options && options.capacity ? Number(options.capacity) : 10 * 1024 * 1024
     this.dir = path.join(getClient().env.supportPath, ".launcher", "cache", ns)
     try { fs.mkdirSync(this.dir, { recursive: true }) } catch {}
@@ -339,14 +346,17 @@ export const OAuth: any = {
       this.redirectMethod = options.redirectMethod
       this.providerName = String(options.providerName || "")
       this.providerIcon = options.providerIcon
-      this.providerId = String(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"))
+      this.providerId = safeName(options.providerId || this.providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-"), "provider")
       this.description = String(options.description || "")
       this.tokenFile = path.join(getClient().env.supportPath, ".launcher", "oauth", this.providerId + ".json")
     }
+    // The launcher handles exactly one URL scheme, its own. Raycast's redirect
+    // URLs (raycast://oauth, com.raycast:/oauth, raycast.com/redirect) would
+    // bounce back to a scheme this machine does not route to us, so every
+    // method advertises the launcher's; a provider whose OAuth app only
+    // registered Raycast's redirect URI will reject the request.
     get redirectURL() {
-      if (this.redirectMethod === "app") return "raycast://oauth?package_name=Extension"
-      if (this.redirectMethod === "appURI") return "com.raycast:/oauth?package_name=Extension"
-      return "https://raycast.com/redirect?packageName=Extension"
+      return "omarchy-launcher://oauth?package_name=Extension"
     }
     async authorizationRequest(options: any) {
       const crypto = require("node:crypto")

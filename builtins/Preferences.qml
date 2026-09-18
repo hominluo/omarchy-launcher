@@ -282,7 +282,7 @@ BuiltinHost {
     var cfg = { "default": String(values["default"] || "anthropic"), providers: providers }
     host.aiConfig = cfg
     var file = service.configDir + "/ai.json"
-    Quickshell.execDetached(["bash", "-c", "umask 077; printf '%s\n' \"$2\" > \"$1\" && chmod 600 \"$1\"", "--", file, JSON.stringify(cfg, null, 2)])
+    service.writeSecretFile(file, cfg)
     host.toast("success", "AI providers saved", Object.keys(providers).length ? Object.keys(providers).join(", ") : "none")
     host.pop()
     // The runtime reads ai.json on each request; restart it so capabilities refresh.

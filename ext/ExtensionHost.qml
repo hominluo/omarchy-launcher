@@ -130,8 +130,13 @@ Item {
   function reply(id, result) { write({ jsonrpc: "2.0", id: id, result: result === undefined ? null : result }) }
   function replyError(id, message) { write({ jsonrpc: "2.0", id: id, error: { code: -32000, message: String(message) } }) }
 
+  // The sidecar caps its own frames at 8 MiB (transport.ts MAX_FRAME); this
+  // is the belt to that brace, since SplitParser itself has no limit.
+  readonly property int maxFrameBytes: 8 * 1024 * 1024
+
   function onLine(line) {
     var msg
+    if (line.length > host.maxFrameBytes) { console.warn("ext-host: frame too large, dropped"); return }
     try { msg = JSON.parse(line) } catch (e) { console.warn("ext-host: bad frame", line.slice(0, 200)); return }
     if (msg.method === "host.hello") { host.handshake(msg.params || {}); return }
     if (msg.method !== undefined) {
@@ -360,15 +365,15 @@ Item {
       case "ui.popToRoot": if (sess && sess.panel) sess.panel.popToRoot(); return
       case "ui.closeMainWindow": if (sess && sess.panel) { if (p.popToRoot === "immediate") sess.panel.popToRoot(); sess.panel.dismiss() } return
       case "ui.clearSearchBar": if (sess && sess.panel) sess.panel.setSearchText(""); return
-      case "ui.setSearchText": if (sess && sess.panel) sess.panel.setSearchText(String(p.text || "")); return
+      case "ui.setSearchText": if (sess && sess.panel) sess.panel.setSearchText(String(p.text || "").slice(0, 1000)); return
       case "ui.toast.show": case "ui.toast.update":
-        if (sess && sess.panel) sess.panel.showToast({ id: p.id, style: p.style, title: p.title, message: p.message, duration: p.style === "animated" ? 0 : 3200,
+        if (sess && sess.panel) sess.panel.showToast({ id: p.id, style: p.style, title: String(p.title || "").slice(0, 200), message: String(p.message || "").slice(0, 500), duration: p.style === "animated" ? 0 : 3200,
           primaryAction: p.primaryAction ? { title: p.primaryAction.title, run: function() { sess.toastAction(p.primaryAction.id) } } : null })
         return
       case "ui.toast.hide": if (sess && sess.panel) sess.panel.hideToast(); return
       case "ui.hud":
         if (sess && sess.panel) sess.panel.dismiss()
-        Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({ icon: "󱓞", message: String(p.text || ""), duration: 1800 })])
+        Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({ icon: "󱓞", message: String(p.text || "").slice(0, 200), duration: 1800 })])
         return
       case "ui.dropdownValue": if (sess && sess.panel) sess.panel.setAccessoryValue(sess.viewKey(p.view), String(p.value)); return
       case "ui.openPreferences": if (sess && sess.panel && service) service.runCommandId("cmd:preferences", sess.panel, { extension: sess.extensionId }); return
@@ -427,11 +432,11 @@ Item {
         return { ok: true }
       }
       case "clipboard.clear": Quickshell.execDetached(["wl-copy", "--clear"]); return { ok: true }
-      case "clipboard.read": clipboardRead.replyId = id; clipboardRead.offset = Number(p.offset || 0); clipboardRead.running = true; return undefined
+      case "clipboard.read": clipboardRead.replyId = id; clipboardRead.offset = Math.max(0, Math.min(999, Math.floor(Number(p.offset) || 0))); clipboardRead.running = true; return undefined
       case "system.open": {
-        var target = String(p.target || "")
-        if (p.app) Quickshell.execDetached(["bash", "-lc", "uwsm-app -- gtk-launch " + JSON.stringify(String(p.app).replace(/\.desktop$/, "") + ".desktop") + " " + JSON.stringify(target) + " || xdg-open " + JSON.stringify(target)])
-        else Quickshell.execDetached(["xdg-open", target])
+        // Argument vectors only, and only web links, mail links or existing
+        // paths (Service.openExternal); an extension never reaches a shell.
+        if (!service || !service.openExternal(String(p.target || ""), p.app ? String(p.app) : "")) throw new Error("refusing to open that target")
         return { ok: true }
       }
       case "system.getApplications": {
@@ -445,8 +450,12 @@ Item {
         var cls = t && t.lastIpcObject ? String(t.lastIpcObject["class"] || "") : ""
         return { name: cls || "unknown", path: "", bundleId: cls }
       }
-      case "system.showInFileBrowser": Quickshell.execDetached(["bash", "-lc", "nautilus --select " + JSON.stringify(String(p.path)) + " 2>/dev/null || xdg-open " + JSON.stringify(String(p.path).replace(/\/[^/]*$/, ""))]); return { ok: true }
-      case "system.trash": Quickshell.execDetached(["gio", "trash"].concat((p.paths || []).map(String))); return { ok: true }
+      case "system.showInFileBrowser": if (!service || !service.revealInFileManager(String(p.path || ""))) throw new Error("not a local path"); return { ok: true }
+      case "system.trash": {
+        var tp = (p.paths || []).map(String).filter(function(x) { return x.charAt(0) === "/" })
+        if (tp.length) Quickshell.execDetached(["gio", "trash", "--"].concat(tp))
+        return { ok: true }
+      }
       case "command.launch": {
         if (!service) throw new Error("no service")
         var extId = p.extensionName ? ((p.ownerOrAuthorName || (sess ? sess.extensionId.split("/")[0] : "")) + "/" + p.extensionName) : (sess ? sess.extensionId : "")
@@ -456,7 +465,12 @@ Item {
       }
       case "oauth.authorize": {
         if (!sess || !sess.panel) throw new Error("no session")
-        oauthWaiters[String(p.state)] = id
+        // The state is what the callback is matched on: it must exist and
+        // be the random token authorizationRequest() minted.
+        var st = String(p.state || "")
+        if (!/^[A-Za-z0-9_-]{8,256}$/.test(st)) throw new Error("oauth state missing")
+        if (!/^https:\/\//i.test(String(p.url || ""))) throw new Error("the authorization URL must be https")
+        oauthWaiters[st] = id
         Quickshell.execDetached(["xdg-open", String(p.url)])
         sess.panel.showToast({ style: "animated", title: "Waiting for " + (p.providerName || "the browser") + "…", message: "Finish signing in, then return here" })
         return undefined
@@ -471,6 +485,7 @@ Item {
   property var oauthWaiters: ({})
   function oauthCallback(params) {
     var state = String(params && params.state || "")
+    if (state === "") return false
     var id = oauthWaiters[state]
     if (id === undefined) return false
     var next = ({})
@@ -494,9 +509,13 @@ Item {
     if (method === "wm.setWindowBounds") {
       var b = p.bounds || {}
       var addr = String(p.id || "")
+      // The address and every number land in a hyprctl batch line; only a
+      // window address and bounded integers may, never a second dispatcher.
+      if (!/^0x[0-9a-f]{1,16}$/.test(addr)) throw new Error("bad window id")
+      var n = function(v) { v = Math.round(Number(v)); if (!isFinite(v)) throw new Error("bad bounds"); return Math.max(-32768, Math.min(32768, v)) }
       var cmds = []
-      if (b.size) cmds.push("dispatch resizewindowpixel exact " + Math.round(b.size.width) + " " + Math.round(b.size.height) + ",address:" + addr)
-      if (b.position) cmds.push("dispatch movewindowpixel exact " + Math.round(b.position.x) + " " + Math.round(b.position.y) + ",address:" + addr)
+      if (b.size) cmds.push("dispatch resizewindowpixel exact " + n(b.size.width) + " " + n(b.size.height) + ",address:" + addr)
+      if (b.position) cmds.push("dispatch movewindowpixel exact " + n(b.position.x) + " " + n(b.position.y) + ",address:" + addr)
       if (cmds.length) Quickshell.execDetached(["hyprctl", "--batch", cmds.join("; ")])
       return { ok: true }
     }

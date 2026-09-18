@@ -86,6 +86,7 @@ BuiltinHost {
   FileView {
     id: stateFile
     path: host.statePath
+    atomicWrites: true
     printErrors: false
     onLoaded: {
       try {

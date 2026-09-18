@@ -149,7 +149,8 @@
     "handler": "notes",
     "args": {
       "mode": "toggle"
-    }
+    },
+    "urlOpen": false
   },
   {
     "id": "notes-search",
@@ -191,7 +192,8 @@
     "handler": "focus",
     "args": {
       "mode": "start"
-    }
+    },
+    "urlOpen": false
   },
   {
     "id": "focus-stop",
@@ -205,7 +207,8 @@
     "handler": "focus",
     "args": {
       "mode": "stop"
-    }
+    },
+    "urlOpen": false
   },
   {
     "id": "reminder-set",
@@ -250,7 +253,8 @@
     "handler": "colors",
     "args": {
       "mode": "pick"
-    }
+    },
+    "urlOpen": false
   },
   {
     "id": "color-history",

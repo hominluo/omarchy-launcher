@@ -65,9 +65,9 @@ To keep the launcher without the button, move its entry from `bar.layout` to
 "plugins": [{ "id": "io.github.hominluo.launcher" }]
 ```
 
-Requires Omarchy 4.x with the Quickshell shell. Node.js 22+ only for
-extensions (`omarchy pkg add nodejs npm`). Remove it with
-`omarchy plugin remove io.github.hominluo.launcher`.
+Requires Omarchy 4.x with the Quickshell shell. Node.js 22+, git and
+esbuild only for extensions (`omarchy pkg add nodejs npm git esbuild`).
+Remove it with `omarchy plugin remove io.github.hominluo.launcher`.
 
 ## The default page
 
@@ -213,15 +213,17 @@ Preferences or the `Ctrl+K` action panel.
 
 ## Raycast extensions
 
-`launcher ext install <owner/name>` downloads the prebuilt bundle straight
-from the Raycast Store (no Node toolchain needed for installs) and its
-commands appear in root search. The runtime is a Node sidecar that renders
+`launcher ext install <owner/name>` looks the extension up in the Raycast
+Store, fetches its source at the exact commit the store lists in
+[raycast/extensions](https://github.com/raycast/extensions), builds it here
+(see [Provenance](#provenance)) and its commands appear in root search. The
+runtime is a Node sidecar that renders
 the extension's React tree natively through the same view model the
 built-ins use: lists with sections, accessories and detail panes, grids,
 forms, detail pages with metadata, action panels with shortcuts, toasts,
 alerts, dropdown accessories, navigation, LocalStorage, Cache, preferences
 (with a form for required ones), Clipboard, `open`, OAuth (PKCE with the
-`raycast://` redirect), Hyprland-backed WindowManagement, menu-bar commands
+`omarchy-launcher://oauth` redirect), Hyprland-backed WindowManagement, menu-bar commands
 (persistent sessions shown as bar buttons), and `AI.ask` through the
 configured provider. Commands that declare `arguments` prompt for them in a
 form, or take the text after their alias as the first one. Extensions that
@@ -238,21 +240,89 @@ call AppleScript or ship macOS binaries are flagged at install time.
 launcher ext search github
 launcher ext install thomas/hacker-news     # owner/name from the store URL
 launcher ext list
-launcher ext update                         # every store extension
+launcher ext update                         # every extension, from its recorded origin
 launcher ext remove thomas/hacker-news
 ```
 
-Extensions can also be built from source, which needs `npm` (the build uses
-the esbuild that ships with `@raycast/api`): a local checkout, any git URL
-(`#subdir` optional), or a folder of the official repo, e.g.
+Extensions can also be built from a local checkout, a git URL, or a folder of
+the official repo, e.g.
 `launcher ext install https://github.com/raycast/extensions/tree/main/extensions/hacker-news`.
+A git URL is pinned to a commit before anything is fetched: `url#<40-hex sha>`
+or `--commit <sha>` names it outright; `--ref <branch|tag>` (or the `tree/…`
+part of a GitHub URL) is resolved once, printed as `pinned to …`, and that is
+what `ext update` compares against later. `--subdir <dir>` picks a folder of
+a larger repository.
+
+### Provenance
+
+Every install is built here from source that names one immutable commit:
+
+- the exact commit is fetched (`git fetch <sha>`), and the checkout is
+  verified to be at that commit before it is read;
+- a committed `package-lock.json` is required, and every package in it must
+  be a `registry.npmjs.org` tarball with an integrity hash — no lockfile, a
+  workspace link or a tarball from elsewhere refuses the install;
+- dependencies are installed with `npm ci --ignore-scripts`, with every
+  npm setting that matters pinned on the command line so the checkout's own
+  `.npmrc` cannot change the registry or re-enable scripts;
+- the bundle is produced by the system's `/usr/bin/esbuild` (the Arch
+  package), never by a binary that came with the source;
+- what was built is recorded in the extension's `install.json` (commit,
+  lockfile SHA-256, esbuild and Node versions) and its origin in
+  `~/.local/share/omarchy-launcher/origins.json`, which only the CLI writes.
+
+Before anything is built, the CLI prints the source, the lockfile summary,
+the toolchain and every setting the extension declares (secrets marked), and
+asks for a `y`; `--yes` skips the question. Nothing prebuilt is ever
+installed: the store's zip has no digest a client could verify.
+
+### Trust model
+
+**Installing an extension means running its code as you.** Extension
+commands run in a Node sidecar — one process, a worker thread per command —
+with the full Node API: files, processes, the network. Through the launcher
+they can also read the clipboard and its history, read the selected text,
+paste into the focused window, open links and files, launch other installed
+extensions' commands, use your configured AI provider (`AI.ask`, at your
+cost), and read the preferences and OAuth tokens of other extensions (they
+are separate files, not separate accounts). There is no sandbox. Install
+what you would run as a program.
+
+What the launcher itself does bound: everything an extension renders is
+capped (rows, sections, text, markdown, a frame of at most 8 MiB), remote
+images it shows are fetched by the sidecar under a size cap, checked to be
+PNG/JPEG/GIF/WebP and loaded by the shell from disk — the shell process never
+opens a URL an extension chose; targets handed to `open`, `showInFinder` and
+`trash` are passed to programs as arguments (web, mail and existing local
+paths only) and never through a shell; window addresses and bounds are
+validated before they reach `hyprctl`; OAuth authorizations need the random
+state the launcher minted and an `https` URL.
 
 `launcher` lives in `bin/` of the plugin; add it to your `PATH` or call it by
 path. Extensions land in `~/.local/share/omarchy-launcher/extensions/`, their
 data in `…/support/`, their preferences in `~/.config/omarchy-launcher/prefs/`.
-`raycast://extensions/<owner>/<name>/<command>` deeplinks are handled by
-`launcher url <uri>` (`setup.sh` registers it as the `x-scheme-handler` for
-`raycast`, `com.raycast` and `omarchy-launcher` links).
+
+### Links
+
+`setup.sh` registers `launcher url <uri>` as the handler for
+`omarchy-launcher://` links, and for nothing else (`raycast://` links are not
+ours; an older registration for them is removed). Because any web page can
+open such a link, a link may open a view or fill the search box but never
+runs anything by itself:
+
+| Link | What happens |
+|---|---|
+| `omarchy-launcher://extensions/<owner>/<name>/<command>?arguments=<json>` | a confirmation card names the extension, the command and the arguments (matched against the ones the command declares); *Run* launches it, and Cancel is the default |
+| `omarchy-launcher://open?view=<id>&query=…` | a built-in view opens; a command that would execute something is only put in the search box |
+| `omarchy-launcher://quicklink/<id>?query=…` | a confirmation card shows the resolved URL |
+| `omarchy-launcher://script-commands/<text>` | the text is put in the search box |
+| `omarchy-launcher://oauth?state=…&code=…` | completes the authorization whose `state` the launcher minted |
+| `omarchy-launcher://toggle`, `…://confetti` | toggle the window; a notification |
+
+OAuth: the redirect URL an extension advertises is
+`omarchy-launcher://oauth?package_name=Extension`. A provider whose OAuth app
+only registered Raycast's redirect URIs will reject the request — configure
+your own OAuth app with the extension's client id and that redirect.
 
 ## Keyboard
 
@@ -344,7 +414,8 @@ Modes `silent`, `compact` (toast), `fullOutput` (streamed page), and `inline`
 | `~/.config/omarchy-launcher/ai.json` | AI providers (mode 0600) |
 | `~/.config/omarchy-launcher/prefs/*.json` | Extension preferences (mode 0600) |
 | `~/.local/state/omarchy-launcher/` | Frecency, search history, clipboard pins, notes, colors, focus state, emoji recents |
-| `~/.local/share/omarchy-launcher/` | Installed extensions, their support data, OAuth tokens |
+| `~/.local/share/omarchy-launcher/` | Installed extensions, their support data, OAuth tokens, `origins.json` (where each extension came from) |
+| `~/.cache/omarchy-launcher/` | `src/` (pinned checkouts, one per commit), `npm/` (npm's cache), `images/` (remote images extensions showed, sniffed and size-capped) |
 
 Settings, snippets and quicklinks hot-reload; hand edits apply without
 restarting the shell.
@@ -355,17 +426,23 @@ restarting the shell.
 git clone https://github.com/hominluo/omarchy-launcher.git ~/.config/omarchy/plugins/io.github.hominluo.launcher
 omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.hominluo.launcher --after omarchy.menu
-npm test                      # unit tests for lib/*.js (node --test)
+npm test                      # node --test tests/: lib/*.js, the built CLI against a scratch HOME, the sidecar
 omarchy plugin validate .     # the manifest checks the shell enforces
 omarchy restart shell         # after changes to Service.qml, builtins/ or data/; ui/ hot-reloads
 ```
+
+`OMARCHY_LAUNCHER_ESBUILD=<path>` points the CLI (and the tests) at another
+esbuild binary when `/usr/bin/esbuild` is not installed. Releases are listed
+in [CHANGELOG.md](CHANGELOG.md).
 
 The extension runtime and the CLI are TypeScript under `packages/`; their
 bundles in `runtime/` are committed because the plugin installer never runs
 code (`ext-host.js` is the launcher's own code, unminified; `vendor.js` is
 React, react-reconciler and scheduler, minified; `cli.js` the CLI). Rebuild with `npm run build` in `packages/ext-host` and `packages/cli`
 (dependencies install with `bin-links=false` so the plugin folder stays free
-of symlinks, which the validator forbids). `packages/ext-host/test/harness.js
+of symlinks, which the validator forbids); `node packages/<pkg>/build.mjs
+--check` verifies that the committed bundles are exactly what the sources
+produce (the test suite runs it when the devDependencies are installed). `packages/ext-host/test/harness.js
 <extensionDir> <command>` drives the sidecar without the shell. A hidden
 "Dev: Render Fixture" command renders the view-model fixtures in
 `tests/fixtures/`.

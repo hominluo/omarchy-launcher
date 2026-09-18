@@ -5,10 +5,22 @@
 // (and under the marketplace's 512 KiB per-file scan limit).
 import { build } from "esbuild"
 import { fileURLToPath } from "node:url"
+import fs from "node:fs"
 import path from "node:path"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const runtime = path.resolve(here, "../../runtime")
+// `--check`: rebuild in memory and fail when a committed bundle differs.
+const check = process.argv.includes("--check")
+let mismatch = false
+function verify(result) {
+  for (const out of result.outputFiles) {
+    let current = null
+    try { current = fs.readFileSync(out.path) } catch {}
+    if (!current || !current.equals(Buffer.from(out.contents))) { console.error(`${out.path} does not match the sources`); mismatch = true }
+    else console.log(`${out.path} matches the sources`)
+  }
+}
 const VENDORED = ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-reconciler", "react-reconciler/constants", "scheduler"]
 
 // Rewrites `import x from "react"` (and the require() calls in
@@ -38,8 +50,9 @@ await build({
   legalComments: "none",
   define: { "process.env.NODE_ENV": '"production"' },
   banner: { js: "/* Omarchy Launcher extension host vendor bundle: react 19.3.0, react-reconciler 0.34.0, scheduler (production builds, minified). Built by packages/ext-host/build.mjs; do not edit. */" },
-  logLevel: "info"
-})
+  logLevel: check ? "warning" : "info",
+  write: !check
+}).then((r) => { if (check) verify(r) })
 
 await build({
   entryPoints: [path.join(here, "src/index.ts")],
@@ -54,5 +67,7 @@ await build({
   plugins: [vendorPlugin],
   define: { "process.env.NODE_ENV": '"production"' },
   banner: { js: "#!/usr/bin/env node\n/* Omarchy Launcher extension host — built from packages/ext-host; do not edit. React lives in vendor.js. */" },
-  logLevel: "info"
-})
+  logLevel: check ? "warning" : "info",
+  write: !check
+}).then((r) => { if (check) verify(r) })
+if (check && mismatch) { console.error("run: node packages/ext-host/build.mjs"); process.exit(1) }
