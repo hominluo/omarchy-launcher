@@ -5,7 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { EXT_DIR } from "./paths"
-import { safeSegment, plainName, assertInsideExtDir, copyTreeNoSymlinks } from "./fsio"
+import { safeSegment, plainName, assertInsideExtDir, copyTreeNoSymlinks, isStagingName } from "./fsio"
 
 export const ESBUILD = process.env.OMARCHY_LAUNCHER_ESBUILD || "/usr/bin/esbuild"
 
@@ -53,6 +53,20 @@ export function build(src: string, provenance: Provenance, log: (s: string) => v
   const dest = path.join(EXT_DIR, owner, name)
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   assertInsideExtDir(dest)
+  // A previous build that was killed left its staging directory behind;
+  // the index skips those, and this removes them (a symlink is unlinked,
+  // never followed). A directory touched in the last few minutes is left
+  // alone: it may belong to a build running right now.
+  try {
+    const od = path.dirname(dest)
+    for (const n of fs.readdirSync(od)) {
+      if (!n.startsWith(name + ".building-") || !isStagingName(n)) continue
+      const p = path.join(od, n)
+      let st: fs.Stats; try { st = fs.lstatSync(p) } catch { continue }
+      if (Date.now() - st.mtimeMs < 10 * 60 * 1000) continue
+      fs.rmSync(p, { recursive: true, force: true })
+    }
+  } catch {}
   const staging = fs.mkdtempSync(dest + ".building-")
   try {
     bundle(src, manifest, staging, log)

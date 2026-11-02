@@ -19,7 +19,7 @@ function scratch() {
   // An empty PATH keeps the CLI from reaching the real omarchy-shell.
   const env = { ...process.env, HOME: home, PATH: bin, XDG_CONFIG_HOME: "", XDG_DATA_HOME: "" }
   const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8" })
-  return { home, run, extDir: path.join(home, ".local", "share", "omarchy-launcher", "extensions") }
+  return { home, run, env, extDir: path.join(home, ".local", "share", "omarchy-launcher", "extensions") }
 }
 
 function fixture(home, manifest) {
@@ -94,7 +94,7 @@ function scratch2() {
   const env = { ...process.env, HOME: s.home, PATH: [bin, ...toolDirs, "/usr/bin", "/bin"].join(":"), XDG_CONFIG_HOME: "", XDG_DATA_HOME: "", OMARCHY_LAUNCHER_ESBUILD: esbuild }
   const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8", input: "" })
   const ipc = () => { try { return fs.readFileSync(path.join(s.home, "ipc.log"), "utf8") } catch { return "" } }
-  return { ...s, run, esbuild, ipc, dataDir: path.join(s.home, ".local", "share", "omarchy-launcher") }
+  return { ...s, run, esbuild, ipc, env, dataDir: path.join(s.home, ".local", "share", "omarchy-launcher") }
 }
 
 // A lockfile v3 with no dependencies at all: the smallest thing npm ci accepts.
@@ -290,4 +290,112 @@ test("write-file writes only plain JSON files under the launcher's own directori
   assert.equal(r.status, 1)
   r = runIn('{"x":1}\n', "--", path.join(prefs, "not-json.txt"))
   assert.equal(r.status, 1)
+})
+
+// ------------------------------------------------- round 3: interrupted builds, locks, write order
+
+function ghost(dir, name) {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name, title: name, commands: [] }))
+  return dir
+}
+
+test("a staging directory an interrupted build left behind is not indexed", () => {
+  const { run, extDir } = scratch2()
+  ghost(path.join(extDir, "acme", "foo"), "foo")
+  ghost(path.join(extDir, "acme", "foo.building-ab12cd"), "foo.building-ab12cd")
+  const r = run("ext", "reindex")
+  assert.equal(r.status, 0, r.stderr)
+  const ids = JSON.parse(fs.readFileSync(path.join(extDir, "index.json"), "utf8")).extensions.map((e) => e.id)
+  assert.deepEqual(ids, ["acme/foo"])
+})
+
+test("a build clears the staging directory an interrupted build left behind", (t) => {
+  const { home, run, esbuild, dataDir } = scratch2()
+  if (!esbuild) { t.skip("no esbuild available"); return }
+  const dir = sourceExt(home)
+  const ownerDir = path.join(dataDir, "extensions", "tester")
+  const stale = ghost(path.join(ownerDir, "hello.building-0ld0ne"), "hello")
+  const old = Date.now() / 1000 - 60 * 60
+  fs.utimesSync(stale, old, old)
+  // A directory touched just now may belong to a build that is running.
+  const fresh = ghost(path.join(ownerDir, "hello.building-fresh1"), "hello")
+  const r = run("ext", "install", dir, "--yes")
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.ok(!fs.existsSync(stale), "the stale staging directory is gone")
+  assert.ok(fs.existsSync(fresh), "a recent one is left alone")
+  assert.deepEqual(fs.readdirSync(ownerDir).sort(), ["hello", "hello.building-fresh1"])
+})
+
+test("a shell that never answers is given up on instead of hanging the CLI", () => {
+  const s = scratch2()
+  fs.writeFileSync(path.join(s.home, "bin", "omarchy-shell"), "#!/bin/sh\nsleep 30\n", { mode: 0o755 })
+  const started = Date.now()
+  const r = spawnSync(process.execPath, [CLI, "status"], { env: { ...s.env, OMARCHY_LAUNCHER_SHELL_TIMEOUT_MS: "200" }, encoding: "utf8" })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /omarchy-shell did not answer "status" within/)
+  assert.ok(Date.now() - started < 10_000, "the wait is bounded")
+  // A shell that does answer is unaffected.
+  fs.writeFileSync(path.join(s.home, "bin", "omarchy-shell"), "#!/bin/sh\necho ok\n", { mode: 0o755 })
+  const ok = s.run("status")
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.equal(ok.stdout.trim(), "ok")
+})
+
+test("write-file refuses a path outside the launcher before creating anything", () => {
+  const { home, run } = scratch2()
+  const runIn = (input, ...args) => spawnSync(process.execPath, [CLI, "write-file", ...args], { env: { ...process.env, HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8", input })
+  const outside = path.join(home, "outside", "deeper", "x.json")
+  const r = runIn('{"x":1}\n', "--", outside)
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /only writes under/)
+  assert.ok(!fs.existsSync(path.join(home, "outside")), "no directory was left behind")
+  // A nested path under a launcher directory is still created and written.
+  const inside = path.join(home, ".config", "omarchy-launcher", "prefs", "sub", "y.json")
+  const ok = runIn('{"x":1}\n', "--", inside)
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(inside, "utf8")), { x: 1 })
+})
+
+test("the index is edited under a lock: a stale one is broken, a live one is waited for", () => {
+  const { home, run, env, extDir } = scratch2()
+  ghost(path.join(extDir, "acme", "foo"), "foo")
+  const index = path.join(extDir, "index.json")
+  const lock = index + ".lock"
+  const before = JSON.stringify({ version: 1, extensions: [{ id: "acme/foo", owner: "acme", name: "foo", dir: path.join(extDir, "acme", "foo"), commands: [], compat: { status: "full", notes: [] }, preferences: [], tools: [] }] })
+  fs.writeFileSync(index, before)
+  // A lock left by a launcher that died is broken instead of blocking forever.
+  fs.writeFileSync(lock, "")
+  const old = Date.now() / 1000 - 10 * 60
+  fs.utimesSync(lock, old, old)
+  let r = run("ext", "reindex")
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!fs.existsSync(lock), "the lock is released")
+  // A lock held right now is respected: the write waits, then reports, and
+  // the document is left as it was.
+  fs.writeFileSync(index, before)
+  fs.writeFileSync(lock, "")
+  const started = Date.now()
+  r = spawnSync(process.execPath, [CLI, "ext", "reindex"], { env: { ...env, OMARCHY_LAUNCHER_LOCK_WAIT_MS: "200" }, encoding: "utf8" })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /timed out waiting for .*index\.json\.lock/)
+  assert.ok(Date.now() - started >= 150, "it waited for the lock")
+  assert.equal(fs.readFileSync(index, "utf8"), before, "nothing was written over another launcher's edit")
+  assert.ok(fs.existsSync(lock), "someone else's lock is not removed")
+  assert.deepEqual(fs.readdirSync(extDir).filter((n) => n.endsWith(".tmp")), [])
+})
+
+test("remove edits the index and the origins under their locks and leaves no lock behind", () => {
+  const { run, extDir, dataDir } = scratch2()
+  const dir = ghost(path.join(extDir, "acme", "foo"), "foo")
+  const index = path.join(extDir, "index.json")
+  fs.writeFileSync(index, JSON.stringify({ version: 1, extensions: [{ id: "acme/foo", owner: "acme", name: "foo", dir, commands: [], compat: { status: "full", notes: [] }, preferences: [], tools: [] }] }))
+  const origins = path.join(dataDir, "origins.json")
+  fs.writeFileSync(origins, JSON.stringify({ version: 1, origins: { "acme/foo": { kind: "local", dir: "/tmp/src" } } }))
+  const r = run("ext", "remove", "acme/foo")
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.ok(!fs.existsSync(dir))
+  assert.deepEqual(JSON.parse(fs.readFileSync(index, "utf8")).extensions, [])
+  assert.deepEqual(JSON.parse(fs.readFileSync(origins, "utf8")).origins, {})
+  assert.deepEqual(fs.readdirSync(dataDir).filter((n) => n.endsWith(".lock")), [])
 })

@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process"
 import { search, lookup, StoreMeta } from "./store"
 import { build, esbuildVersion, ESBUILD } from "./build"
 import { resolveInstallSpec, fetchPinned, checkLockfile, npmCi, resolveRef, storeSpec, InstallSpec } from "./source"
-import { readIndex, rebuild, entryFor, writeIndex } from "./registry"
+import { readIndex, rebuild, entryFor, updateIndex } from "./registry"
 import { readOrigins, setOrigin, deleteOrigin, Origin } from "./origins"
 import { EXT_DIR, PLUGIN_ID, CONFIG_DIR, DATA_DIR, STATE_DIR, PREFS_DIR, CACHE_DIR } from "./paths"
 import { atomicWrite, assertInsideExtDir, cleanText, safeSegment } from "./fsio"
@@ -34,8 +34,17 @@ Every install needs git, npm and esbuild (omarchy pkg add esbuild). Extensions r
 full user privileges once launched; the install prompt lists what each one declares.
 `
 
+// omarchy-shell answers over the shell's socket. A shell that is wedged (or
+// a socket left behind by one) must not keep the CLI waiting forever, so the
+// call is bounded; OMARCHY_LAUNCHER_SHELL_TIMEOUT_MS overrides the bound.
+const SHELL_TIMEOUT_MS = (() => {
+  const v = Number(process.env.OMARCHY_LAUNCHER_SHELL_TIMEOUT_MS)
+  return Number.isFinite(v) && v > 0 ? v : 15_000
+})()
+
 function shell(method: string, ...args: string[]) {
-  const r = spawnSync("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8", maxBuffer: 1024 * 1024 })
+  const r = spawnSync("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: SHELL_TIMEOUT_MS })
+  if (r.error && (r.error as any).code === "ETIMEDOUT") throw new Error(`omarchy-shell did not answer "${method}" within ${Math.round(SHELL_TIMEOUT_MS / 1000)}s; is the shell running?`)
   return (r.stdout || "").trim()
 }
 
@@ -143,10 +152,10 @@ async function installSpec(spec: InstallSpec, yes: boolean): Promise<void> {
     : spec.kind === "git" ? { kind: "git", url: spec.url, ref: spec.ref, commit: spec.commit, subdir: spec.subdir }
     : { kind: "local", dir: spec.dir }
   setOrigin(id, origin)
-  const idx = readIndex()
   const entry = entryFor(built.dir, built.owner, built.name, record)
-  idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id))
-  writeIndex(idx)
+  updateIndex((idx) => {
+    idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id))
+  })
   log(`Installed ${entry.title}: ${entry.commands.map((c: any) => c.title).join(", ")}`)
   if (entry.compat.status !== "full") log(`Compatibility: ${entry.compat.status} (${entry.compat.notes.join("; ")})`)
   const required = entry.preferences.filter((p: any) => p.required && p.default === undefined)
@@ -194,8 +203,7 @@ function extRemove(spec: string) {
   const dir = path.join(EXT_DIR, e.owner, e.name)
   assertInsideExtDir(dir)
   fs.rmSync(dir, { recursive: true, force: true })
-  idx.extensions = idx.extensions.filter((x) => x.id !== e.id)
-  writeIndex(idx)
+  updateIndex((idx) => { idx.extensions = idx.extensions.filter((x) => x.id !== e.id) })
   deleteOrigin(e.id)
   log(`Removed ${e.id}`)
   shell("reindex")
@@ -229,6 +237,19 @@ function handleUrl(uri: string) {
   process.stdout.write(shell(r.method, b64(r.payload)) + "\n")
 }
 
+// The nearest directory at or above `p` that exists, resolved through
+// realpath: a symlink anywhere up the chain cannot move the directory
+// mkdir is about to create outside the launcher's own tree.
+function existingAncestor(p: string): string {
+  let cur = path.resolve(p)
+  for (;;) {
+    try { return fs.realpathSync(cur) } catch (e: any) { if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e }
+    const up = path.dirname(cur)
+    if (up === cur) return cur
+    cur = up
+  }
+}
+
 // One JSON document from stdin (a single line), written 0600 through
 // atomicWrite into a launcher config/state file. The shell uses this for
 // extension preferences and provider keys instead of a shell redirect.
@@ -238,10 +259,15 @@ function writeFile(flags: Flags) {
   const mode = flags.mode === undefined ? 0o600 : parseInt(flags.mode, 8)
   if (!(mode === 0o600 || mode === 0o644)) throw new Error("write-file --mode must be 600 or 644")
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/.test(path.basename(target))) throw new Error("write-file only writes plain .json names")
-  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 })
-  const parent = fs.realpathSync(path.dirname(target))
+  const dir = path.dirname(target)
   const allowed = [CONFIG_DIR, STATE_DIR].map((d) => { try { return fs.realpathSync(d) } catch { return d } })
-  if (!allowed.some((d) => parent === d || parent.startsWith(d + path.sep))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`)
+  const inside = (p: string, d: string) => p === d || p.startsWith(d + path.sep)
+  // The whole chain is checked before anything is created: a refused path
+  // must not leave an empty directory behind.
+  if (!allowed.some((d) => inside(existingAncestor(dir), d))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`)
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const parent = fs.realpathSync(dir)
+  if (!allowed.some((d) => inside(parent, d))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`)
   const chunks: Buffer[] = []
   let total = 0
   const buf = Buffer.alloc(65536)

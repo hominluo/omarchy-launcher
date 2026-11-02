@@ -242,6 +242,10 @@ Item {
 
   function doLaunch(l) {
     var win = l.win
+    // A launch that waited for the sidecar can outlive the window that asked
+    // for it; a closed window has nowhere to show the command, so the launch
+    // is dropped instead of pushing views into it.
+    if (!l.menuBar && (!win || win.opened === false)) { host.pendingLaunch = null; return }
     // Replace the "starting" placeholder if one is showing.
     if (win && win.currentView && win.currentView.id === "ext-loading") win.popView()
     host.sessionSerial += 1
@@ -323,8 +327,13 @@ Item {
     if (wasMenuBar) host.updateMenubars()
   }
 
-  // The window closed: extension sessions end (Raycast unloads commands too).
+  // The window closed: extension sessions end (Raycast unloads commands too),
+  // and a launch still waiting for the sidecar is forgotten — the window it
+  // was going to show is gone.
   function onWindowClosed() {
+    // A menu-bar launch has no window of its own, so closing the main one
+    // must not forget it.
+    if (host.pendingLaunch && !host.pendingLaunch.menuBar) host.pendingLaunch = null
     var ids = Object.keys(host.sessions)
     for (var i = 0; i < ids.length; i++) {
       if (host.sessions[ids[i]].menuBar) continue

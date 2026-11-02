@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "../lib/Shell.js" as Shell
 
 // Run Shell Command: type a command; Enter runs it in a floating terminal,
 // Ctrl+Enter runs it silently and shows the output here.
@@ -21,7 +22,7 @@ BuiltinHost {
       detail: host.output ? { markdown: "```\n" + host.output + "\n```" } : null,
       data: { cmd: host.query.trim() },
       actions: { sections: [{ actions: [
-        { id: "terminal", title: "Run in Terminal", icon: "󰆍", run: function(item) { Quickshell.execDetached(["bash", "-lc", "omarchy-launch-floating-terminal-with-presentation " + JSON.stringify(item.data.cmd)]); return false } },
+        { id: "terminal", title: "Run in Terminal", icon: "󰆍", run: function(item) { Quickshell.execDetached(["bash", "-lc", "omarchy-launch-floating-terminal-with-presentation " + Shell.quote(item.data.cmd)]); return false } },
         { id: "silent", title: "Run and Show Output", icon: "󰆍", run: function(item) { self.runSilent(item.data.cmd); return true } },
         { id: "copy", title: "Copy Output", icon: "󰆏", run: function() { self.copyText(self.output); return false } }
       ] }] }
@@ -57,7 +58,7 @@ BuiltinHost {
   function runSilent(cmd) {
     host.running = true
     host.output = ""
-    runner.command = ["bash", "-lc", cmd + " 2>&1 | head -c 20000"]
+    runner.command = Shell.silentArgs(cmd)
     runner.running = true
     host.render(buildView())
   }

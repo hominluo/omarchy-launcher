@@ -33,6 +33,55 @@ export function atomicWrite(file: string, data: string | Buffer, mode = 0o600) {
   }
 }
 
+// A staging directory left behind by an interrupted build: `<name>.building-XXXXXX`
+// beside the install directory. Never an extension of its own.
+export const STAGING = /\.building-[A-Za-z0-9]+$/
+
+export function isStagingName(name: string): boolean {
+  return STAGING.test(name)
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+// The index and the origins are whole-document read-modify-writes, and two
+// launchers can run at once (a terminal and the panel's own writes). The
+// document is therefore only edited while holding a lock file beside it,
+// taken with O_EXCL so a second writer waits instead of overwriting an
+// entry. A lock older than a minute is a writer that died and is broken;
+// the wait itself is bounded so a stuck lock cannot hang the CLI forever.
+const LOCK_STALE_MS = 60_000
+const LOCK_WAIT_MS = (() => {
+  const v = Number(process.env.OMARCHY_LAUNCHER_LOCK_WAIT_MS)
+  return Number.isFinite(v) && v >= 0 ? v : 10_000
+})()
+
+export function withFileLock<T>(file: string, fn: () => T): T {
+  const lock = file + ".lock"
+  fs.mkdirSync(path.dirname(lock), { recursive: true })
+  const deadline = Date.now() + LOCK_WAIT_MS
+  let fd = -1
+  while (fd < 0) {
+    try {
+      fd = fs.openSync(lock, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+    } catch (e: any) {
+      if (e.code !== "EEXIST") throw e
+      try {
+        if (Date.now() - fs.lstatSync(lock).mtimeMs > LOCK_STALE_MS) { fs.unlinkSync(lock); continue }
+      } catch (e2: any) { if (e2.code === "ENOENT") continue; throw e2 }
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for ${lock}; remove it if no other launcher is running`)
+      sleepSync(25)
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    try { fs.closeSync(fd) } catch {}
+    try { fs.unlinkSync(lock) } catch {}
+  }
+}
+
 // Store metadata and extension manifests decide which directory under
 // EXT_DIR an extension lives in — and is later removed from. Only a plain
 // single path component may become one.

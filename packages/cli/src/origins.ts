@@ -4,7 +4,7 @@
 // update would clone and build whatever the extension chose.
 import fs from "node:fs"
 import { ORIGINS_FILE } from "./paths"
-import { atomicWrite } from "./fsio"
+import { atomicWrite, withFileLock } from "./fsio"
 
 export type Origin =
   | { kind: "store"; owner: string; name: string; commit: string }
@@ -24,14 +24,18 @@ function writeOrigins(origins: Record<string, Origin>) {
 }
 
 export function setOrigin(id: string, origin: Origin) {
-  const all = readOrigins()
-  all[id] = origin
-  writeOrigins(all)
+  withFileLock(ORIGINS_FILE, () => {
+    const all = readOrigins()
+    all[id] = origin
+    writeOrigins(all)
+  })
 }
 
 export function deleteOrigin(id: string) {
-  const all = readOrigins()
-  if (!(id in all)) return
-  delete all[id]
-  writeOrigins(all)
+  withFileLock(ORIGINS_FILE, () => {
+    const all = readOrigins()
+    if (!(id in all)) return
+    delete all[id]
+    writeOrigins(all)
+  })
 }

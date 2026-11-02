@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { EXT_DIR, INDEX_FILE } from "./paths"
 import { scan } from "./compat"
-import { atomicWrite, plainName, SEGMENT } from "./fsio"
+import { atomicWrite, isStagingName, plainName, SEGMENT, withFileLock } from "./fsio"
 
 export interface IndexEntry {
   id: string; owner: string; name: string; title: string; description: string; icon: string; dir: string
@@ -22,6 +22,17 @@ export function readIndex(): { version: number; extensions: IndexEntry[] } {
 export function writeIndex(idx: { version: number; extensions: IndexEntry[] }) {
   fs.mkdirSync(EXT_DIR, { recursive: true })
   atomicWrite(INDEX_FILE, JSON.stringify(idx, null, 2) + "\n", 0o644)
+}
+
+// Change the index under its lock: the document another launcher is editing
+// is read again here, so neither one drops the other's entry.
+export function updateIndex(fn: (idx: { version: number; extensions: IndexEntry[] }) => void): { version: number; extensions: IndexEntry[] } {
+  return withFileLock(INDEX_FILE, () => {
+    const idx = readIndex()
+    fn(idx)
+    writeIndex(idx)
+    return idx
+  })
 }
 
 // An asset file name from the manifest: one plain component under assets/.
@@ -61,23 +72,27 @@ export function rebuild(): { version: number; extensions: IndexEntry[] } {
   const out: IndexEntry[] = []
   // Directory names on disk are what an entry's id and `dir` are built
   // from; a name that is not a plain segment, or a symlink standing in for
-  // a directory, is skipped rather than followed.
+  // a directory, is skipped rather than followed. A `.building-*` directory
+  // is a build that was interrupted before it could be renamed into place —
+  // it holds a package.json and would otherwise be listed as an extension.
   const isDir = (p: string) => { try { return fs.lstatSync(p).isDirectory() } catch { return false } }
-  try {
-    for (const owner of fs.readdirSync(EXT_DIR)) {
-      const od = path.join(EXT_DIR, owner)
-      if (!SEGMENT.test(owner) || !isDir(od)) continue
-      for (const name of fs.readdirSync(od)) {
-        const dir = path.join(od, name)
-        if (!SEGMENT.test(name) || !isDir(dir)) continue
-        if (!fs.existsSync(path.join(dir, "package.json"))) continue
-        let install: any = {}
-        try { install = JSON.parse(fs.readFileSync(path.join(dir, "install.json"), "utf8")) } catch {}
-        try { out.push(entryFor(dir, owner, name, install)) } catch (e) { process.stderr.write(`skipping ${dir}: ${e}\n`) }
+  return withFileLock(INDEX_FILE, () => {
+    try {
+      for (const owner of fs.readdirSync(EXT_DIR)) {
+        const od = path.join(EXT_DIR, owner)
+        if (!SEGMENT.test(owner) || !isDir(od)) continue
+        for (const name of fs.readdirSync(od)) {
+          const dir = path.join(od, name)
+          if (!SEGMENT.test(name) || isStagingName(name) || !isDir(dir)) continue
+          if (!fs.existsSync(path.join(dir, "package.json"))) continue
+          let install: any = {}
+          try { install = JSON.parse(fs.readFileSync(path.join(dir, "install.json"), "utf8")) } catch {}
+          try { out.push(entryFor(dir, owner, name, install)) } catch (e) { process.stderr.write(`skipping ${dir}: ${e}\n`) }
+        }
       }
-    }
-  } catch {}
-  const idx = { version: 1, extensions: out.sort((a, b) => a.id.localeCompare(b.id)) }
-  writeIndex(idx)
-  return idx
+    } catch {}
+    const idx = { version: 1, extensions: out.sort((a, b) => a.id.localeCompare(b.id)) }
+    writeIndex(idx)
+    return idx
+  })
 }

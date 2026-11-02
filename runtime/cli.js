@@ -191,6 +191,54 @@ function atomicWrite(file, data, mode = 384) {
     throw e;
   }
 }
+var STAGING = /\.building-[A-Za-z0-9]+$/;
+function isStagingName(name) {
+  return STAGING.test(name);
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = (() => {
+  const v = Number(process.env.OMARCHY_LAUNCHER_LOCK_WAIT_MS);
+  return Number.isFinite(v) && v >= 0 ? v : 1e4;
+})();
+function withFileLock(file, fn) {
+  const lock = file + ".lock";
+  import_node_fs.default.mkdirSync(import_node_path2.default.dirname(lock), { recursive: true });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let fd = -1;
+  while (fd < 0) {
+    try {
+      fd = import_node_fs.default.openSync(lock, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 384);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      try {
+        if (Date.now() - import_node_fs.default.lstatSync(lock).mtimeMs > LOCK_STALE_MS) {
+          import_node_fs.default.unlinkSync(lock);
+          continue;
+        }
+      } catch (e2) {
+        if (e2.code === "ENOENT") continue;
+        throw e2;
+      }
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for ${lock}; remove it if no other launcher is running`);
+      sleepSync(25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      import_node_fs.default.closeSync(fd);
+    } catch {
+    }
+    try {
+      import_node_fs.default.unlinkSync(lock);
+    } catch {
+    }
+  }
+}
 var SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 function safeSegment(value, what) {
   const s = String(value ?? "");
@@ -372,6 +420,22 @@ function build(src, provenance, log2) {
   const dest = import_node_path3.default.join(EXT_DIR, owner, name);
   import_node_fs2.default.mkdirSync(import_node_path3.default.dirname(dest), { recursive: true });
   assertInsideExtDir(dest);
+  try {
+    const od = import_node_path3.default.dirname(dest);
+    for (const n of import_node_fs2.default.readdirSync(od)) {
+      if (!n.startsWith(name + ".building-") || !isStagingName(n)) continue;
+      const p = import_node_path3.default.join(od, n);
+      let st;
+      try {
+        st = import_node_fs2.default.lstatSync(p);
+      } catch {
+        continue;
+      }
+      if (Date.now() - st.mtimeMs < 10 * 60 * 1e3) continue;
+      import_node_fs2.default.rmSync(p, { recursive: true, force: true });
+    }
+  } catch {
+  }
   const staging = import_node_fs2.default.mkdtempSync(dest + ".building-");
   try {
     bundle(src, manifest, staging, log2);
@@ -775,6 +839,14 @@ function writeIndex(idx) {
   import_node_fs5.default.mkdirSync(EXT_DIR, { recursive: true });
   atomicWrite(INDEX_FILE, JSON.stringify(idx, null, 2) + "\n", 420);
 }
+function updateIndex(fn) {
+  return withFileLock(INDEX_FILE, () => {
+    const idx = readIndex();
+    fn(idx);
+    writeIndex(idx);
+    return idx;
+  });
+}
 function assetPath(dir, value) {
   if (!plainName(value)) return "";
   const p = import_node_path6.default.join(dir, "assets", value);
@@ -829,32 +901,34 @@ function rebuild() {
       return false;
     }
   };
-  try {
-    for (const owner of import_node_fs5.default.readdirSync(EXT_DIR)) {
-      const od = import_node_path6.default.join(EXT_DIR, owner);
-      if (!SEGMENT.test(owner) || !isDir(od)) continue;
-      for (const name of import_node_fs5.default.readdirSync(od)) {
-        const dir = import_node_path6.default.join(od, name);
-        if (!SEGMENT.test(name) || !isDir(dir)) continue;
-        if (!import_node_fs5.default.existsSync(import_node_path6.default.join(dir, "package.json"))) continue;
-        let install = {};
-        try {
-          install = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dir, "install.json"), "utf8"));
-        } catch {
-        }
-        try {
-          out.push(entryFor(dir, owner, name, install));
-        } catch (e) {
-          process.stderr.write(`skipping ${dir}: ${e}
+  return withFileLock(INDEX_FILE, () => {
+    try {
+      for (const owner of import_node_fs5.default.readdirSync(EXT_DIR)) {
+        const od = import_node_path6.default.join(EXT_DIR, owner);
+        if (!SEGMENT.test(owner) || !isDir(od)) continue;
+        for (const name of import_node_fs5.default.readdirSync(od)) {
+          const dir = import_node_path6.default.join(od, name);
+          if (!SEGMENT.test(name) || isStagingName(name) || !isDir(dir)) continue;
+          if (!import_node_fs5.default.existsSync(import_node_path6.default.join(dir, "package.json"))) continue;
+          let install = {};
+          try {
+            install = JSON.parse(import_node_fs5.default.readFileSync(import_node_path6.default.join(dir, "install.json"), "utf8"));
+          } catch {
+          }
+          try {
+            out.push(entryFor(dir, owner, name, install));
+          } catch (e) {
+            process.stderr.write(`skipping ${dir}: ${e}
 `);
+          }
         }
       }
+    } catch {
     }
-  } catch {
-  }
-  const idx = { version: 1, extensions: out.sort((a, b) => a.id.localeCompare(b.id)) };
-  writeIndex(idx);
-  return idx;
+    const idx = { version: 1, extensions: out.sort((a, b) => a.id.localeCompare(b.id)) };
+    writeIndex(idx);
+    return idx;
+  });
 }
 
 // packages/cli/src/origins.ts
@@ -871,15 +945,19 @@ function writeOrigins(origins) {
   atomicWrite(ORIGINS_FILE, JSON.stringify({ version: 1, origins }, null, 2) + "\n", 384);
 }
 function setOrigin(id, origin) {
-  const all = readOrigins();
-  all[id] = origin;
-  writeOrigins(all);
+  withFileLock(ORIGINS_FILE, () => {
+    const all = readOrigins();
+    all[id] = origin;
+    writeOrigins(all);
+  });
 }
 function deleteOrigin(id) {
-  const all = readOrigins();
-  if (!(id in all)) return;
-  delete all[id];
-  writeOrigins(all);
+  withFileLock(ORIGINS_FILE, () => {
+    const all = readOrigins();
+    if (!(id in all)) return;
+    delete all[id];
+    writeOrigins(all);
+  });
 }
 
 // packages/cli/src/index.ts
@@ -905,8 +983,13 @@ var USAGE = `launcher \u2014 Omarchy Launcher command line
 Every install needs git, npm and esbuild (omarchy pkg add esbuild). Extensions run with your
 full user privileges once launched; the install prompt lists what each one declares.
 `;
+var SHELL_TIMEOUT_MS = (() => {
+  const v = Number(process.env.OMARCHY_LAUNCHER_SHELL_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : 15e3;
+})();
 function shell(method, ...args) {
-  const r = (0, import_node_child_process3.spawnSync)("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+  const r = (0, import_node_child_process3.spawnSync)("omarchy-shell", [PLUGIN_ID, method, ...args], { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: SHELL_TIMEOUT_MS });
+  if (r.error && r.error.code === "ETIMEDOUT") throw new Error(`omarchy-shell did not answer "${method}" within ${Math.round(SHELL_TIMEOUT_MS / 1e3)}s; is the shell running?`);
   return (r.stdout || "").trim();
 }
 function b64(json) {
@@ -1012,10 +1095,10 @@ async function installSpec(spec, yes) {
   atomicWrite(import_node_path7.default.join(built.dir, "install.json"), JSON.stringify(record, null, 2), 420);
   const origin = spec.kind === "store" ? { kind: "store", owner: spec.owner, name: spec.name, commit: spec.commit } : spec.kind === "git" ? { kind: "git", url: spec.url, ref: spec.ref, commit: spec.commit, subdir: spec.subdir } : { kind: "local", dir: spec.dir };
   setOrigin(id, origin);
-  const idx = readIndex();
   const entry = entryFor(built.dir, built.owner, built.name, record);
-  idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
-  writeIndex(idx);
+  updateIndex((idx) => {
+    idx.extensions = idx.extensions.filter((e) => e.id !== entry.id).concat([entry]).sort((a, b) => a.id.localeCompare(b.id));
+  });
   log(`Installed ${entry.title}: ${entry.commands.map((c) => c.title).join(", ")}`);
   if (entry.compat.status !== "full") log(`Compatibility: ${entry.compat.status} (${entry.compat.notes.join("; ")})`);
   const required = entry.preferences.filter((p) => p.required && p.default === void 0);
@@ -1070,8 +1153,9 @@ function extRemove(spec) {
   const dir = import_node_path7.default.join(EXT_DIR, e.owner, e.name);
   assertInsideExtDir(dir);
   import_node_fs7.default.rmSync(dir, { recursive: true, force: true });
-  idx.extensions = idx.extensions.filter((x) => x.id !== e.id);
-  writeIndex(idx);
+  updateIndex((idx2) => {
+    idx2.extensions = idx2.extensions.filter((x) => x.id !== e.id);
+  });
   deleteOrigin(e.id);
   log(`Removed ${e.id}`);
   shell("reindex");
@@ -1116,14 +1200,26 @@ function handleUrl(uri) {
   }
   process.stdout.write(shell(r.method, b64(r.payload)) + "\n");
 }
+function existingAncestor(p) {
+  let cur = import_node_path7.default.resolve(p);
+  for (; ; ) {
+    try {
+      return import_node_fs7.default.realpathSync(cur);
+    } catch (e) {
+      if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;
+    }
+    const up = import_node_path7.default.dirname(cur);
+    if (up === cur) return cur;
+    cur = up;
+  }
+}
 function writeFile(flags) {
   const target = flags.args[0];
   if (!target || !import_node_path7.default.isAbsolute(target)) throw new Error("write-file needs an absolute path");
   const mode = flags.mode === void 0 ? 384 : parseInt(flags.mode, 8);
   if (!(mode === 384 || mode === 420)) throw new Error("write-file --mode must be 600 or 644");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/.test(import_node_path7.default.basename(target))) throw new Error("write-file only writes plain .json names");
-  import_node_fs7.default.mkdirSync(import_node_path7.default.dirname(target), { recursive: true, mode: 448 });
-  const parent = import_node_fs7.default.realpathSync(import_node_path7.default.dirname(target));
+  const dir = import_node_path7.default.dirname(target);
   const allowed = [CONFIG_DIR, STATE_DIR].map((d) => {
     try {
       return import_node_fs7.default.realpathSync(d);
@@ -1131,7 +1227,11 @@ function writeFile(flags) {
       return d;
     }
   });
-  if (!allowed.some((d) => parent === d || parent.startsWith(d + import_node_path7.default.sep))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`);
+  const inside = (p, d) => p === d || p.startsWith(d + import_node_path7.default.sep);
+  if (!allowed.some((d) => inside(existingAncestor(dir), d))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`);
+  import_node_fs7.default.mkdirSync(dir, { recursive: true, mode: 448 });
+  const parent = import_node_fs7.default.realpathSync(dir);
+  if (!allowed.some((d) => inside(parent, d))) throw new Error(`write-file only writes under ${CONFIG_DIR} or ${STATE_DIR}`);
   const chunks = [];
   let total = 0;
   const buf = Buffer.alloc(65536);

@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.0.4 — 2026-11-01
+
+Correctness and robustness fixes from a full review of the CLI, the extension
+host and the QML front end.
+
+- A build that was killed mid-copy left a `<name>.building-XXXXXX` directory
+  behind, and `ext reindex` listed it as a real extension. Staging directories
+  are no longer indexed, and a new build prunes stale ones (fresh ones are
+  left alone, in case another build is running).
+- Extension preference files are named `<owner-length>-<owner>-<name>.json`
+  and carry their id inside the document. The old `owner.name.json` mapping
+  was not reversible (`acme.corp/my-ext` read back as `acme/corp.my-ext`, and
+  `a.b/c` and `a/b.c` shared one file). Files written by older releases still
+  load.
+- A pending launch is forgotten when the window it was going to use closes;
+  previously the handshake pushed views into a dead window and left the next
+  open stuck on "Starting the extension runtime…". A menu-bar launch, which
+  has no window, is kept.
+- `omarchy-shell` calls have a 15-second timeout, so a wedged shell no longer
+  hangs `ext install`, `ext remove` or `ext status`. Override with
+  `OMARCHY_LAUNCHER_SHELL_TIMEOUT_MS`.
+- `write-file` checks the allow-list before creating anything: a refused path
+  no longer leaves an empty `0700` directory behind.
+- `index.json` and `origins.json` are edited under a lock file, so two
+  launchers (a terminal and the panel) cannot drop each other's entry. A lock
+  left by a dead writer is broken after a minute; the wait is bounded.
+- Paths and typed commands are quoted for bash (`lib/Shell.js`), and the icon
+  scan uses bash arrays. A `$HOME` or `XDG_DATA_DIRS` entry containing a
+  space used to break window actions, hidden-app detection and icon lookup.
+- "Run and Show Output" passes the command through `eval` as one argument, so
+  a trailing comment, pipe or redirect is parsed as typed and the 20 KB output
+  cap is actually applied.
+
 ## 1.0.3 — 2026-09-18
 
 Security hardening after the second marketplace review.

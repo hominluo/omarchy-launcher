@@ -11,6 +11,8 @@ import "lib/Units.js" as Units
 import "lib/RootPage.js" as RootPage
 import "lib/OmarchyMenu.js" as Menu
 import "lib/Inline.js" as Inline
+import "lib/Shell.js" as Shell
+import "lib/Prefs.js" as Prefs
 import "builtins" as Builtins
 import "ext" as Ext
 
@@ -124,7 +126,7 @@ Item {
       h.open(win, raw.args || {})
       return true
     }
-    var commandLine = raw.exec ? String(raw.exec) : (raw.action ? root.pluginDir + "/bin/wm.sh " + raw.action : "")
+    var commandLine = raw.exec ? String(raw.exec) : (raw.action ? Shell.quote(root.pluginDir + "/bin/wm.sh") + " " + Shell.quote(raw.action) : "")
     if (!commandLine) return false
     var exec = function() {
       if (raw.delayMs) Quickshell.execDetached(["bash", "-lc", "sleep " + (Number(raw.delayMs) / 1000) + "; " + commandLine])
@@ -528,7 +530,7 @@ Item {
     if (entry.kind === "app") {
       secondary.push({ id: "copy-name", title: "Copy Application Name", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.title]); return false } })
     } else if (entry.raw && (entry.raw.exec || entry.raw.action) && !isCategory) {
-      secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.raw.exec || (self.pluginDir + "/bin/wm.sh " + entry.raw.action)]); return false } })
+      secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", entry.raw.exec || (Shell.quote(self.pluginDir + "/bin/wm.sh") + " " + Shell.quote(entry.raw.action))]); return false } })
     } else if (entry.menuEntry && entry.menuEntry.action) {
       secondary.push({ id: "copy-cmd", title: "Copy Command", icon: "󰆏", run: function() { Quickshell.execDetached(["wl-copy", "--", String(entry.menuEntry.action)]); return false } })
     }
@@ -913,7 +915,7 @@ Item {
   Process {
     id: hiddenScan
     property string collected: ""
-    command: ["bash", "-c", "[[ -f " + root.hiddenScript + " ]] && bash " + root.hiddenScript + " \"$XDG_CURRENT_DESKTOP:$XDG_SESSION_DESKTOP:$DESKTOP_SESSION\" || true"]
+    command: ["bash", "-c", "[[ -f " + Shell.quote(root.hiddenScript) + " ]] && bash " + Shell.quote(root.hiddenScript) + " \"$XDG_CURRENT_DESKTOP:$XDG_SESSION_DESKTOP:$DESKTOP_SESSION\" || true"]
     stdout: SplitParser { onRead: function(line) { hiddenScan.collected += line + "\n" } }
     onStarted: hiddenScan.collected = ""
     onExited: { root.desktopHiddenIds = Apps.parseIdList(hiddenScan.collected); root.rebuildApps() }
@@ -1163,7 +1165,8 @@ Item {
   }
 
   // Merged preference values: manifest defaults, extension-level values,
-  // then command-level values from ~/.config/omarchy-launcher/prefs/<owner>.<name>.json
+  // then command-level values from the extension's file in
+  // ~/.config/omarchy-launcher/prefs (see lib/Prefs.js for its name).
   property var extensionPrefs: ({})
   function extensionPreferences(ext, cmd) {
     var out = {}
@@ -1195,8 +1198,8 @@ Item {
     for (var k in root.extensionPrefs) next[k] = root.extensionPrefs[k]
     next[extId] = data
     root.extensionPrefs = next
-    var file = root.configDir + "/prefs/" + String(extId).replace("/", ".") + ".json"
-    root.writeSecretFile(file, data)
+    var file = root.configDir + "/prefs/" + Prefs.fileName(extId)
+    root.writeSecretFile(file, Prefs.pack(extId, data))
   }
 
   // Settings files that may hold secrets are written by the CLI's
@@ -1251,15 +1254,26 @@ Item {
   function loadExtensionPrefs() { prefsLoader.running = true }
   Process {
     id: prefsLoader
-    command: ["bash", "-c", "cd " + JSON.stringify(root.configDir + "/prefs") + " 2>/dev/null || exit 0; for f in *.json; do [[ -f $f ]] || continue; printf '===%s===\n' \"${f%.json}\"; cat \"$f\"; printf '\n=== EOM ===\n'; done"]
+    command: ["bash", "-c", "cd " + Shell.quote(root.configDir + "/prefs") + " 2>/dev/null || exit 0; for f in *.json; do [[ -f $f ]] || continue; printf '===%s===\n' \"${f%.json}\"; cat \"$f\"; printf '\n=== EOM ===\n'; done"]
     stdout: StdioCollector {
       onStreamFinished: {
         var out = {}
+        var packed = ({})
         var blocks = String(text || "").split("=== EOM ===")
         for (var i = 0; i < blocks.length; i++) {
           var m = blocks[i].match(/===(.+?)===\n([\s\S]*)$/)
           if (!m) continue
-          try { out[m[1].replace(".", "/")] = JSON.parse(m[2]) } catch (e) {}
+          var parsed
+          try { parsed = JSON.parse(m[2]) } catch (e) { continue }
+          var id = Prefs.idFor(m[1], parsed)
+          if (parsed && typeof parsed === "object" && parsed[Prefs.ID_KEY] !== undefined) {
+            // A file that names its extension wins over an older
+            // "owner.name.json" left beside it for the same one.
+            out[id] = Prefs.unpack(parsed)
+            packed[id] = true
+          } else if (!packed[id]) {
+            out[id] = parsed
+          }
         }
         root.extensionPrefs = out
       }
