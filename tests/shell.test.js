@@ -44,6 +44,18 @@ test("the icon scan finds icons under a home directory with a space", () => {
   assert.ok(r.stdout.indexOf("from-home.svg") < r.stdout.indexOf("from-data.png"))
 })
 
+test("the icon index prefers the sharpest file for a name", () => {
+  const at = (size, ext) => "/usr/share/icons/hicolor/" + size + "/apps/steam." + ext
+  assert.ok(Apps.iconRank(at("256x256", "png")) > Apps.iconRank(at("16x16", "png")))
+  assert.ok(Apps.iconRank(at("512x512", "png")) > Apps.iconRank(at("256x256", "png")))
+  // Scalable icons beat every raster size.
+  assert.ok(Apps.iconRank(at("scalable", "svg")) > Apps.iconRank(at("512x512", "png")))
+  // HiDPI variants count their scale.
+  assert.ok(Apps.iconRank("/usr/share/icons/Yaru/24x24@2x/apps/firefox.png") > Apps.iconRank("/usr/share/icons/Yaru/24x24/apps/firefox.png"))
+  // No declared size: the first hit keeps winning.
+  assert.equal(Apps.iconRank("/usr/share/pixmaps/steam.png"), 0)
+})
+
 test("a typed command is run as typed, and its output is capped", () => {
   const run = (cmd) => { const argv = Shell.silentArgs(cmd); return spawnSync(argv[0], argv.slice(1), { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }) }
   // Appending " 2>&1 | head -c 20000" to the text would leave this comment

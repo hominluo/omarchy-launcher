@@ -895,8 +895,13 @@ Item {
     command: ["bash", "-c", Apps.iconIndexScanCommand()]
     stdout: SplitParser {
       onRead: function(line) {
-        var name = Apps.iconNameFromPath(line)
-        if (name && root.pendingIconIndex[name] === undefined) root.pendingIconIndex[name] = String(line).trim()
+        var value = String(line).trim()
+        var name = Apps.iconNameFromPath(value)
+        if (!name) return
+        var current = root.pendingIconIndex[name]
+        // Keep the sharpest file for each name: the scan walks themes and
+        // sizes in filesystem order, so "first hit" can be a 16x16 PNG.
+        if (current === undefined || Apps.iconRank(value) > Apps.iconRank(current)) root.pendingIconIndex[name] = value
       }
     }
     onStarted: { root.pendingIconIndex = ({}); root.lastIconScan = Date.now() }

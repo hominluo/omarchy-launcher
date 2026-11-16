@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5 — 2026-11-16
+
+Icon quality fix.
+
+- The app icon index keeps the sharpest file for each icon name instead of the
+  first one the scan reaches. Scalable icons win over every raster; among
+  rasters the largest size declared in the path wins, HiDPI variants included.
+  Steam and Counter-Strike 2 used to resolve to their 16x16 PNGs and looked
+  blurry when drawn at launcher size.
+
 ## 1.0.4 — 2026-11-01
 
 Correctness and robustness fixes from a full review of the CLI, the extension
